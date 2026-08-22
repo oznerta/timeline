@@ -438,9 +438,7 @@ export function createInitialTimeline(
     },
   ];
 
-  const defaultAssignees: Assignee[] = [
-    { id: `assignee-${project.id}`, projectId: project.id, name: 'Lead', initials: 'LD', color: '#F59E0B' },
-  ];
+  const defaultAssignees: Assignee[] = [];
 
   const defaultTags: Tag[] = [
     { id: `tag-${Date.now()}-1`, projectId: project.id, name: 'Strategy', color: '#EC4899', orderIndex: 1 },

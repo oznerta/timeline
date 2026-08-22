@@ -646,11 +646,13 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
     seenIds.add(ownerId);
     seenNames.add(rawOwnerName.toLowerCase());
 
-    // 2. Include any other saved assignees from data.assignees
+    // 2. Include any other saved assignees from data.assignees (excluding legacy placeholders)
     (data.assignees || []).forEach((ass) => {
-      if (seenIds.has(ass.id) || seenNames.has(ass.name.toLowerCase())) return;
+      const normalizedName = (ass.name || '').trim().toLowerCase();
+      if (normalizedName === 'lead' || normalizedName === 'owner' || ass.id.startsWith('assignee-')) return;
+      if (seenIds.has(ass.id) || seenNames.has(normalizedName)) return;
       seenIds.add(ass.id);
-      seenNames.add(ass.name.toLowerCase());
+      seenNames.add(normalizedName);
       list.push(ass);
     });
 
