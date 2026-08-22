@@ -32,6 +32,18 @@ import {
   X,
 } from 'lucide-react';
 import { Folder, Project, TimelineData } from '@/types/timeline';
+import {
+  fetchWorkspaceFolders,
+  fetchWorkspaceProjects,
+  createWorkspaceFolder,
+  renameWorkspaceFolder,
+  deleteWorkspaceFolder,
+  moveWorkspaceProject,
+  renameWorkspaceProject,
+  trashWorkspaceProject,
+  restoreWorkspaceProject,
+  deleteWorkspaceProjectPermanently,
+} from '@/lib/data-service';
 
 interface WeeklineDashboardProps {
   timelineData: TimelineData;
@@ -96,33 +108,24 @@ export function WeeklineDashboard({
   // Fetch projects and folders
   const loadWorkspaceData = useCallback(async () => {
     try {
-      const [projRes, foldRes] = await Promise.all([
-        fetch('/api/timelines', { cache: 'no-store' }),
-        fetch('/api/folders', { cache: 'no-store' }),
+      const [projects, fetchedFolders] = await Promise.all([
+        fetchWorkspaceProjects(currentUser?.id),
+        fetchWorkspaceFolders(currentUser?.id),
       ]);
 
-      if (projRes.ok) {
-        const pData = await projRes.json();
-        setProjectsList(pData.projects || []);
-      }
-
-      if (foldRes.ok) {
-        const fData = await foldRes.json();
-        if (fData.folders) {
-          setFolders(fData.folders);
-          const exp: Record<string, boolean> = {};
-          fData.folders.forEach((f: Folder) => {
-            exp[f.id] = true;
-          });
-          setExpandedFolders(exp);
-        }
-      }
+      setProjectsList(projects || []);
+      setFolders(fetchedFolders || []);
+      const exp: Record<string, boolean> = {};
+      (fetchedFolders || []).forEach((f: Folder) => {
+        exp[f.id] = true;
+      });
+      setExpandedFolders(exp);
     } catch (e) {
       console.warn('Could not load workspace metadata:', e);
     } finally {
       setIsLoadingData(false);
     }
-  }, []);
+  }, [currentUser?.id]);
 
   useEffect(() => {
     loadWorkspaceData();
@@ -149,17 +152,10 @@ export function WeeklineDashboard({
     if (!newFolderName.trim()) return;
 
     try {
-      const res = await fetch('/api/folders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newFolderName.trim(), color: newFolderColor }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setFolders((prev) => [...prev, data.folder]);
-        setExpandedFolders((prev) => ({ ...prev, [data.folder.id]: true }));
-        setActiveView(data.folder.id);
-      }
+      const created = await createWorkspaceFolder(newFolderName.trim(), newFolderColor, currentUser?.id);
+      setFolders((prev) => [...prev.filter((f) => f.id !== created.id), created]);
+      setExpandedFolders((prev) => ({ ...prev, [created.id]: true }));
+      setActiveView(created.id);
     } catch (err) {
       console.error('Failed to create folder:', err);
     } finally {
@@ -173,15 +169,7 @@ export function WeeklineDashboard({
     if (!renamingFolder || !renameFolderName.trim()) return;
 
     try {
-      await fetch('/api/folders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'rename',
-          folderId: renamingFolder.id,
-          name: renameFolderName.trim(),
-        }),
-      });
+      await renameWorkspaceFolder(renamingFolder.id, renameFolderName.trim());
       setFolders((prev) =>
         prev.map((f) => (f.id === renamingFolder.id ? { ...f, name: renameFolderName.trim() } : f))
       );
@@ -200,7 +188,7 @@ export function WeeklineDashboard({
     }
 
     try {
-      await fetch(`/api/folders?id=${folderId}`, { method: 'DELETE' });
+      await deleteWorkspaceFolder(folderId);
       setFolders((prev) => prev.filter((f) => f.id !== folderId));
       setProjectsList((prev) =>
         prev.map((p) => (p.folderId === folderId ? { ...p, folderId: null } : p))
@@ -234,15 +222,7 @@ export function WeeklineDashboard({
     if (!renamingProject || !renameProjectTitle.trim()) return;
 
     try {
-      await fetch('/api/timelines', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'rename',
-          projectId: renamingProject.id,
-          title: renameProjectTitle.trim(),
-        }),
-      });
+      await renameWorkspaceProject(renamingProject.id, renameProjectTitle.trim());
       setProjectsList((prev) =>
         prev.map((p) =>
           p.id === renamingProject.id || p.slug === renamingProject.id
@@ -264,15 +244,7 @@ export function WeeklineDashboard({
 
     const targetFolderId = selectedDestinationFolder || null;
     try {
-      await fetch('/api/timelines', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'move_to_folder',
-          projectId: movingProject.id,
-          folderId: targetFolderId,
-        }),
-      });
+      await moveWorkspaceProject(movingProject.id, targetFolderId);
       setProjectsList((prev) =>
         prev.map((p) =>
           p.id === movingProject.id || p.slug === movingProject.id
@@ -297,11 +269,7 @@ export function WeeklineDashboard({
       e.stopPropagation();
     }
     try {
-      await fetch('/api/timelines', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'trash', projectId }),
-      });
+      await trashWorkspaceProject(projectId);
       setProjectsList((prev) =>
         prev.map((p) => (p.id === projectId || p.slug === projectId ? { ...p, isTrashed: true } : p))
       );
@@ -314,11 +282,7 @@ export function WeeklineDashboard({
     e.preventDefault();
     e.stopPropagation();
     try {
-      await fetch('/api/timelines', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'restore', projectId }),
-      });
+      await restoreWorkspaceProject(projectId);
       setProjectsList((prev) =>
         prev.map((p) => (p.id === projectId || p.slug === projectId ? { ...p, isTrashed: false } : p))
       );
@@ -332,11 +296,7 @@ export function WeeklineDashboard({
     e.stopPropagation();
     if (!confirm('Permanently delete this timeline? This action cannot be undone.')) return;
     try {
-      await fetch('/api/timelines', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete_permanently', projectId }),
-      });
+      await deleteWorkspaceProjectPermanently(projectId);
       setProjectsList((prev) => prev.filter((p) => p.id !== projectId && p.slug !== projectId));
     } catch (err) {
       console.error('Failed to delete timeline permanently:', err);
@@ -346,11 +306,8 @@ export function WeeklineDashboard({
   const handleEmptyTrash = async () => {
     if (!confirm('Are you sure you want to permanently delete all items in the Trash?')) return;
     try {
-      await fetch('/api/timelines', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'empty_trash' }),
-      });
+      const trashed = projectsList.filter((p) => p.isTrashed);
+      await Promise.all(trashed.map((p) => deleteWorkspaceProjectPermanently(p.id)));
       setProjectsList((prev) => prev.filter((p) => !p.isTrashed));
     } catch (err) {
       console.error('Failed to empty trash:', err);

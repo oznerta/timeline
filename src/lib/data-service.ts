@@ -1,6 +1,7 @@
 import {
   Assignee,
   CategoryTrack,
+  Folder,
   Project,
   Sprint,
   Tag,
@@ -299,3 +300,328 @@ export async function persistTimelineData(data: TimelineData): Promise<void> {
     }
   }
 }
+
+// ==========================================
+// WORKSPACE FOLDERS & TIMELINES OPERATIONS
+// ==========================================
+
+const LOCAL_STORAGE_FOLDERS_KEY = 'weekline_workspace_folders';
+const LOCAL_STORAGE_PROJECTS_KEY = 'weekline_workspace_projects';
+
+export async function fetchWorkspaceFolders(userId?: string): Promise<Folder[]> {
+  // 1. Fetch from Supabase if configured
+  if (isSupabaseConfigured && supabase) {
+    try {
+      let query = supabase.from('folders').select('*').order('created_at', { ascending: true });
+      if (userId) {
+        query = query.or(`user_id.eq.${userId},user_id.eq.user,user_id.is.null`);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        const folders: Folder[] = data.map((f: any) => ({
+          id: f.id,
+          userId: f.user_id,
+          name: f.name,
+          color: f.color,
+          orderIndex: f.order_index,
+          createdAt: f.created_at,
+        }));
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(LOCAL_STORAGE_FOLDERS_KEY, JSON.stringify(folders));
+        }
+        return folders;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch folders from Supabase:', e);
+    }
+  }
+
+  // 2. Fetch from Local API (SQLite)
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await fetch('/api/folders', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.folders) {
+          localStorage.setItem(LOCAL_STORAGE_FOLDERS_KEY, JSON.stringify(data.folders));
+          return data.folders;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch folders from API:', e);
+    }
+  }
+
+  // 3. Fallback to LocalStorage
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_FOLDERS_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch {}
+  }
+
+  return [];
+}
+
+export async function createWorkspaceFolder(name: string, color: string = '#F59E0B', userId?: string): Promise<Folder> {
+  const newFolder: Folder = {
+    id: `folder-${Date.now()}`,
+    userId: userId || 'user',
+    name: name.trim(),
+    color,
+    createdAt: new Date().toISOString(),
+  };
+
+  // Supabase
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase.from('folders').upsert({
+        id: newFolder.id,
+        user_id: newFolder.userId,
+        name: newFolder.name,
+        color: newFolder.color,
+        created_at: newFolder.createdAt,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn('Failed to create folder in Supabase:', e);
+    }
+  }
+
+  // Local API (SQLite)
+  if (typeof window !== 'undefined') {
+    try {
+      fetch('/api/folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, color }),
+      }).catch(() => {});
+    } catch {}
+  }
+
+  // LocalStorage
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_FOLDERS_KEY);
+      const existing: Folder[] = raw ? JSON.parse(raw) : [];
+      const updated = [...existing.filter((f) => f.id !== newFolder.id), newFolder];
+      localStorage.setItem(LOCAL_STORAGE_FOLDERS_KEY, JSON.stringify(updated));
+    } catch {}
+  }
+
+  return newFolder;
+}
+
+export async function renameWorkspaceFolder(folderId: string, name: string): Promise<void> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase.from('folders').update({
+        name: name.trim(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', folderId);
+    } catch (e) {
+      console.warn('Failed to rename folder in Supabase:', e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      fetch('/api/folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rename', folderId, name: name.trim() }),
+      }).catch(() => {});
+    } catch {}
+  }
+}
+
+export async function deleteWorkspaceFolder(folderId: string): Promise<void> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      // Unlink projects from this folder
+      await supabase.from('projects').update({ folder_id: null }).eq('folder_id', folderId);
+      await supabase.from('folders').delete().eq('id', folderId);
+    } catch (e) {
+      console.warn('Failed to delete folder in Supabase:', e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      fetch(`/api/folders?id=${folderId}`, { method: 'DELETE' }).catch(() => {});
+    } catch {}
+  }
+}
+
+export async function fetchWorkspaceProjects(userId?: string): Promise<Project[]> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      let query = supabase.from('projects').select('*').order('updated_at', { ascending: false });
+      if (userId) {
+        query = query.or(`user_id.eq.${userId},user_id.is.null`);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        const projects: Project[] = data.map((p: any) => ({
+          id: p.id,
+          userId: p.user_id,
+          folderId: p.folder_id,
+          slug: p.slug,
+          title: p.title,
+          subtitle: p.subtitle,
+          clientName: p.client_name,
+          brandName: p.brand_name,
+          accessLevel: p.access_level || 'public_view',
+          isFavorite: p.is_favorite || false,
+          isTrashed: p.status === 'trashed',
+          status: p.status || 'active',
+          createdAt: p.created_at,
+          updatedAt: p.updated_at,
+        }));
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(LOCAL_STORAGE_PROJECTS_KEY, JSON.stringify(projects));
+        }
+        return projects;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch projects from Supabase:', e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await fetch('/api/timelines', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.projects) {
+          localStorage.setItem(LOCAL_STORAGE_PROJECTS_KEY, JSON.stringify(data.projects));
+          return data.projects;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch projects from API:', e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_PROJECTS_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch {}
+  }
+
+  return [];
+}
+
+export async function moveWorkspaceProject(projectId: string, folderId: string | null): Promise<void> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase.from('projects').update({
+        folder_id: folderId,
+        updated_at: new Date().toISOString(),
+      }).eq('id', projectId);
+    } catch (e) {
+      console.warn('Failed to move project in Supabase:', e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      fetch('/api/timelines', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'move_to_folder', projectId, folderId }),
+      }).catch(() => {});
+    } catch {}
+  }
+}
+
+export async function renameWorkspaceProject(projectId: string, title: string): Promise<void> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase.from('projects').update({
+        title: title.trim(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', projectId);
+    } catch (e) {
+      console.warn('Failed to rename project in Supabase:', e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      fetch('/api/timelines', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rename', projectId, title: title.trim() }),
+      }).catch(() => {});
+    } catch {}
+  }
+}
+
+export async function trashWorkspaceProject(projectId: string): Promise<void> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase.from('projects').update({
+        status: 'trashed',
+        updated_at: new Date().toISOString(),
+      }).eq('id', projectId);
+    } catch (e) {
+      console.warn('Failed to trash project in Supabase:', e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      fetch('/api/timelines', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'trash', projectId }),
+      }).catch(() => {});
+    } catch {}
+  }
+}
+
+export async function restoreWorkspaceProject(projectId: string): Promise<void> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase.from('projects').update({
+        status: 'active',
+        updated_at: new Date().toISOString(),
+      }).eq('id', projectId);
+    } catch (e) {
+      console.warn('Failed to restore project in Supabase:', e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      fetch('/api/timelines', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'restore', projectId }),
+      }).catch(() => {});
+    } catch {}
+  }
+}
+
+export async function deleteWorkspaceProjectPermanently(projectId: string): Promise<void> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase.from('projects').delete().eq('id', projectId);
+    } catch (e) {
+      console.warn('Failed to permanently delete project in Supabase:', e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      fetch('/api/timelines', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_permanently', projectId }),
+      }).catch(() => {});
+    } catch {}
+  }
+}
+
