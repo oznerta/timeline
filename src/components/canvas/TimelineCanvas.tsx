@@ -1444,17 +1444,28 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                                   {tag?.name || 'TAG'}
                                 </span>
 
-                                <div className="flex items-center -space-x-1.5 shrink-0">
-                                  {taskAssignees.map((a) => (
-                                    <span
-                                      key={a.id}
-                                      title={a.name}
-                                      className="w-5 h-5 rounded-full text-[9px] font-black flex items-center justify-center text-white border-1.5 border-white/90 shrink-0 shadow-xs uppercase tracking-tight"
-                                      style={{ backgroundColor: a.color || '#F59E0B' }}
-                                    >
-                                      {a.initials}
-                                    </span>
-                                  ))}
+                                <div className="flex items-center -space-x-1.5 shrink-0 bg-black/20 backdrop-blur-xs p-0.5 rounded-full">
+                                  {taskAssignees.map((a) => {
+                                    const isLightColor =
+                                      !a.color ||
+                                      a.color === '#F59E0B' ||
+                                      a.color === '#FBBF24' ||
+                                      a.color === '#FDE047' ||
+                                      a.color === '#FEF08A';
+
+                                    return (
+                                      <span
+                                        key={a.id}
+                                        title={a.name}
+                                        className={`w-5 h-5 rounded-full text-[9px] font-black flex items-center justify-center border-2 border-white shadow-md ring-1 ring-black/20 shrink-0 uppercase tracking-tight ${
+                                          isLightColor ? 'text-gray-950' : 'text-white'
+                                        }`}
+                                        style={{ backgroundColor: a.color || '#F59E0B' }}
+                                      >
+                                        {a.initials}
+                                      </span>
+                                    );
+                                  })}
                                 </div>
                               </div>
 
@@ -1693,16 +1704,27 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                             <span className="text-gray-500">Unassigned</span>
                           ) : (
                             <div className="flex items-center -space-x-1 overflow-hidden">
-                              {selectedAssignees.slice(0, 3).map((a) => (
-                                <span
-                                  key={a.id}
-                                  title={a.name}
-                                  className="w-5 h-5 rounded-full text-[9px] font-black flex items-center justify-center text-white border border-white shrink-0 shadow-2xs"
-                                  style={{ backgroundColor: a.color || '#F59E0B' }}
-                                >
-                                  {a.initials}
-                                </span>
-                              ))}
+                              {selectedAssignees.slice(0, 3).map((a) => {
+                                const isLightColor =
+                                  !a.color ||
+                                  a.color === '#F59E0B' ||
+                                  a.color === '#FBBF24' ||
+                                  a.color === '#FDE047' ||
+                                  a.color === '#FEF08A';
+
+                                return (
+                                  <span
+                                    key={a.id}
+                                    title={a.name}
+                                    className={`w-5 h-5 rounded-full text-[9px] font-black flex items-center justify-center border-2 border-white shrink-0 shadow-xs ${
+                                      isLightColor ? 'text-gray-950' : 'text-white'
+                                    }`}
+                                    style={{ backgroundColor: a.color || '#F59E0B' }}
+                                  >
+                                    {a.initials}
+                                  </span>
+                                );
+                              })}
                               <span className="text-xs font-bold text-gray-800 ml-1.5 truncate">
                                 {selectedAssignees.length === 1
                                   ? selectedAssignees[0].name
