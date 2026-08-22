@@ -87,6 +87,27 @@ export async function fetchTimelineData(slug: string = 'master-schedule'): Promi
             supabase.from('collaborators').select('*').eq('project_id', projId),
           ]);
 
+        const accessLevel = projectData.access_level || 'restricted';
+        if (accessLevel === 'restricted') {
+          const { data: { session } } = await supabase.auth.getSession();
+          const currentEmail = session?.user?.email?.toLowerCase();
+          const currentUserId = session?.user?.id;
+          const isOwner = Boolean(
+            currentUserId &&
+            (!projectData.user_id || currentUserId === projectData.user_id)
+          );
+          const isCollaborator = (colRes.data || []).some(
+            (c: any) => c.email?.toLowerCase() === currentEmail
+          );
+
+          if (!isOwner && !isCollaborator) {
+            const err: any = new Error('Access restricted: Private timeline');
+            err.isRestricted = true;
+            err.projectTitle = projectData.title;
+            throw err;
+          }
+        }
+
         const project: Project = {
           id: projectData.id,
           userId: projectData.user_id,
@@ -96,7 +117,7 @@ export async function fetchTimelineData(slug: string = 'master-schedule'): Promi
           subtitle: projectData.subtitle,
           clientName: projectData.client_name,
           brandName: projectData.brand_name,
-          accessLevel: projectData.access_level || 'public_view',
+          accessLevel: accessLevel,
           isFavorite: projectData.is_favorite || false,
           status: projectData.status || 'active',
           createdAt: projectData.created_at,

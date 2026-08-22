@@ -406,7 +406,7 @@ export function createInitialTimeline(
     title,
     subtitle: 'Timeline & Delivery Schedule',
     status: 'active',
-    accessLevel: 'public_view',
+    accessLevel: 'restricted',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };

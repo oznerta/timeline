@@ -99,7 +99,7 @@ export function TimelineCanvasWrapper({ slug }: { slug: string }) {
 
           <div className="flex flex-col w-full gap-2.5 pt-2">
             <Link
-              href="/auth"
+              href={`/auth?redirect=/t/${slug}`}
               className="w-full py-2.5 px-4 bg-[#F59E0B] hover:bg-[#D97706] text-gray-950 font-black text-xs rounded-xl transition-all shadow-md shadow-[#F59E0B]/20 flex items-center justify-center gap-2 cursor-pointer"
             >
               <LogIn className="w-4 h-4" />
