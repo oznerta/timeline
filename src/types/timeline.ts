@@ -68,6 +68,8 @@ export interface DayConfig {
   weekNumber: number;
 }
 
+export type DayInfo = DayConfig;
+
 export interface WeekGroup {
   id: string;
   weekNumber: number;

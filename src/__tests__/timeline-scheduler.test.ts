@@ -13,7 +13,7 @@ const mockDays: DayInfo[] = Array.from({ length: 28 }, (_, i) => {
   const dayName = dayNames[i % 7];
   return {
     id: `day-${i + 1}`,
-    dayNum: i + 1,
+    dayNum: String(i + 1),
     dayName,
     isWeekend: dayName === 'Sun' || dayName === 'Sat',
     isWeekStart: dayName === 'Sun',

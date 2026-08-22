@@ -1252,10 +1252,11 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
   };
 
   const handleCopyShareLink = async () => {
-    if (typeof window !== 'undefined') return;
+    if (typeof window === 'undefined') return;
     const url = `${window.location.origin}/t/${slug}`;
     await navigator.clipboard.writeText(url);
     setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
   };
 
   return (
