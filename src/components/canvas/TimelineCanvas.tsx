@@ -164,7 +164,6 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
 
   // Inspector & Card Editing State
   const [selectedTask, setSelectedTask] = useState<TaskCard | null>(null);
-  const [quickAddCell, setQuickAddCell] = useState<{ categoryId: string; dayId: string } | null>(null);
   const [newDeliverableText, setNewDeliverableText] = useState('');
 
   // Work Stream Management State
@@ -421,10 +420,11 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
     handlePersistChanges(updatedData);
   };
 
-  const handleCreateTask = (title: string, categoryId: string, dayId: string) => {
-    if (isReadOnly || !title.trim()) return;
+  const handleOpenNewTaskModal = (categoryId: string, dayId: string) => {
+    if (isReadOnly) return;
 
-    const defaultTagId = data.tags[0]?.id;
+    const defaultTagId = data.tags[0]?.id || '';
+    const defaultAssigneeId = effectiveAssignees[0]?.id || '';
 
     const newTask: TaskCard = {
       id: `task-${Date.now()}`,
@@ -432,12 +432,12 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
       sprintId: activeSprint.id,
       categoryId,
       tagId: defaultTagId,
-      assigneeId: '',
-      assigneeIds: [],
+      assigneeId: defaultAssigneeId,
+      assigneeIds: defaultAssigneeId ? [defaultAssigneeId] : [],
       dayId,
-      title: title.trim(),
-      deliverables: [title.trim()],
-      deliverableItems: [{ id: `del-${Date.now()}-0`, text: title.trim(), isCompleted: false }],
+      title: '',
+      deliverables: [],
+      deliverableItems: [],
       progressPercentage: 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -445,8 +445,8 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
 
     const updatedTasks = [...data.tasks, newTask];
     const updatedData = { ...data, tasks: updatedTasks };
-    setQuickAddCell(null);
     setSelectedTask(newTask);
+    setNewDeliverableText('');
     handlePersistChanges(updatedData);
   };
 
@@ -1394,14 +1394,19 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                         t.dayId === day.id
                     );
 
-                    const isQuickAdding = quickAddCell?.categoryId === cat.id && quickAddCell?.dayId === day.id;
-
                     return (
                       <div
                         key={day.id}
+                        onClick={() => {
+                          if (!isReadOnly && cellTasks.length === 0) {
+                            handleOpenNewTaskModal(cat.id, day.id);
+                          }
+                        }}
                         className={`p-2 flex flex-col justify-center min-h-[135px] relative group/cell ${
                           day.isWeekStart ? 'border-l-2 border-gray-200 bg-gray-50/30' : 'border-l border-gray-200/60'
-                        } ${day.isWeekend ? 'bg-amber-50/10' : ''}`}
+                        } ${day.isWeekend ? 'bg-amber-50/10' : ''} ${
+                          !isReadOnly && cellTasks.length === 0 ? 'cursor-pointer' : ''
+                        }`}
                       >
                         {cellTasks.map((t) => {
                           const rawAssigneeIds = t.assigneeIds && t.assigneeIds.length > 0
@@ -1483,7 +1488,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                                 ))}
                                 {(!t.deliverableItems || t.deliverableItems.length === 0) && (
                                   <span className="text-[11px] text-white/60 font-medium italic">
-                                    No checklist items
+                                    Click to add checklist items
                                   </span>
                                 )}
                               </div>
@@ -1492,48 +1497,17 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                         })}
 
                         {/* Quick Add Button on Hover */}
-                        {!isReadOnly && cellTasks.length === 0 && !isQuickAdding && (
+                        {!isReadOnly && cellTasks.length === 0 && (
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setQuickAddCell({ categoryId: cat.id, dayId: day.id });
+                              handleOpenNewTaskModal(cat.id, day.id);
                             }}
                             className="w-full h-[110px] border border-dashed border-gray-200 hover:border-[#F59E0B] rounded-xl text-gray-300 hover:text-[#D97706] flex items-center justify-center transition-all opacity-0 group-hover/cell:opacity-100 cursor-pointer"
                           >
                             <Plus className="w-4 h-4" />
                           </button>
-                        )}
-
-                        {/* Quick Add Input */}
-                        {isQuickAdding && (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            className="p-2.5 bg-white border border-[#F59E0B] rounded-xl shadow-xl z-20 flex flex-col gap-2"
-                          >
-                            <input
-                              autoFocus
-                              type="text"
-                              placeholder="Add checklist item..."
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  handleCreateTask(e.currentTarget.value, cat.id, day.id);
-                                } else if (e.key === 'Escape') {
-                                  setQuickAddCell(null);
-                                }
-                              }}
-                              className="w-full bg-gray-50 text-xs font-bold text-gray-900 px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:border-[#F59E0B]"
-                            />
-                            <div className="flex items-center justify-end gap-1">
-                              <button
-                                type="button"
-                                onClick={() => setQuickAddCell(null)}
-                                className="text-[10px] text-gray-500 hover:text-gray-900 px-2 py-0.5 rounded cursor-pointer"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
                         )}
                       </div>
                     );
@@ -1841,6 +1815,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
               {!isReadOnly && (
                 <div className="flex items-center gap-2">
                   <input
+                    autoFocus
                     type="text"
                     placeholder="Add deliverable item..."
                     value={newDeliverableText}
