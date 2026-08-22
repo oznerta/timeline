@@ -1,36 +1,45 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🚀 Weekline — Sprint Delivery Timeline Platform
 
-## Getting Started
+**Weekline** is a modern, high-contrast, production-grade sprint delivery schedule and organization workspace platform built with **Next.js 16 (App Router)**, **React 19**, **TypeScript**, and **Tailwind CSS**, governed by **OmniGate AI**.
+
+---
+
+## 🌟 Key Features
+
+1. **Clean White / Light Aesthetic**: High-contrast modern typography, crisp borders, and vibrant stage gradients (`DESIGN`, `DEV`, `REVIEW`, `QA TEST`, `PUBLISH`).
+2. **Multi-Week Delivery Schedules**: Dynamic month calculation, 4-week structured view, and customizable week filtering.
+3. **Multi-Select Combobox Drawer**: Dynamically toggle and display any combination of weeks (`Week 1`, `Week 2`, `Week 3`, `Week 4`, or `All Weeks`).
+4. **Organization-Based Workspaces**: Multi-tenant workspace management, zero dummy data, and real user persistence.
+5. **Authentication & Route Guard**: Complete Sign In / Sign Up portal with strict dashboard route protection and session restoration (SQLite + Supabase).
+6. **Master Timeline Board**:
+   - Fixed viewport-width month schedule header (does not scroll horizontally).
+   - Sticky top week groups and days header.
+   - Sticky left work stream tracks column with grouped `+ Add` actions.
+
+---
+
+## 🛠️ Getting Started
 
 First, run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) with your browser to launch **Weekline**.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🗺️ Application Routes
 
-## Learn More
+| Route | Purpose |
+|---|---|
+| [`/`](http://localhost:3000) / [`/dashboard`](http://localhost:3000/dashboard) | **Weekline Organization Workspace Dashboard** *(Protected)* |
+| [`/auth`](http://localhost:3000/auth) | **Authentication Portal (Sign In / Sign Up)** |
+| [`/t/:slug`](http://localhost:3000/t/master-schedule) | **Master Delivery Schedule** |
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🏛️ Governance
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This project is governed by **OmniGate AI**. System configuration and architecture blueprints reside in `.omnigate/PROJECT-CONTEXT.md`.

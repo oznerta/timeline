@@ -1,9 +1,10 @@
-<!-- BEGIN:nextjs-agent-rules -->
+# AI Agents Adapter — OmniGate AI
 
-# This is NOT the Next.js you know
+This project uses **OmniGate AI**.
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+**Instruction for AI Assistants (Antigravity / Gemini / OpenHands / Codex):**
+Please immediately read **[OMNIGATE.md](file:///OMNIGATE.md)** for startup safety rules, progressive context loading gates, and non-negotiable governance principles.
 
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
+- System Configuration: `.omnigate/`
+- Project Context: `.omnigate/PROJECT-CONTEXT.md`
+- Developer Handbook: `developer-handbook/`
