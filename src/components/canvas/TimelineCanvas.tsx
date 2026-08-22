@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
+  ArrowLeftRight,
+  ArrowUpDown,
   Calendar,
   Check,
   ChevronDown,
@@ -162,6 +164,46 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
   const [isTaskAssigneeDropdownOpen, setIsTaskAssigneeDropdownOpen] = useState(false);
   const [isSharePermissionDropdownOpen, setIsSharePermissionDropdownOpen] = useState(false);
   const [isShareAccessDropdownOpen, setIsShareAccessDropdownOpen] = useState(false);
+
+  // Scroll Direction Mode: 'horizontal' | 'vertical'
+  const gridContainerRef = useRef<HTMLDivElement>(null);
+  const [scrollMode, setScrollMode] = useState<'horizontal' | 'vertical'>('horizontal');
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('weekline_scroll_mode');
+      if (saved === 'horizontal' || saved === 'vertical') {
+        setScrollMode(saved);
+      }
+    } catch (_) {}
+  }, []);
+
+  const handleToggleScrollMode = (mode: 'horizontal' | 'vertical') => {
+    setScrollMode(mode);
+    try {
+      localStorage.setItem('weekline_scroll_mode', mode);
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    const container = gridContainerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (scrollMode === 'horizontal') {
+        // Redirect vertical wheel movement to horizontal scrolling
+        if (Math.abs(e.deltaY) > 0 && Math.abs(e.deltaX) === 0) {
+          e.preventDefault();
+          container.scrollLeft += e.deltaY;
+        }
+      }
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+    };
+  }, [scrollMode]);
 
   // Inspector & Card Editing State
   const [selectedTask, setSelectedTask] = useState<TaskCard | null>(null);
@@ -1233,7 +1275,10 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
       </div>
 
       {/* FULL-WIDTH FULL-HEIGHT TIMELINE WORKSPACE */}
-      <div className="flex-1 w-full overflow-auto relative bg-[#F8F9FA]">
+      <div
+        ref={gridContainerRef}
+        className="flex-1 w-full overflow-auto relative bg-[#F8F9FA]"
+      >
         <div className="w-max min-w-full pb-16">
           {/* STICKY HEADER: CYCLES & DAYS ROW */}
           <div className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-2xs">
@@ -2481,6 +2526,37 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
           </div>
         </div>
       )}
+
+      {/* FLOATING SCROLL DIRECTION TOGGLE WIDGET (BOTTOM-RIGHT) */}
+      <div className="fixed bottom-6 right-6 z-40 flex items-center p-1 bg-white/95 backdrop-blur-md border border-gray-200/90 rounded-2xl shadow-xl shadow-black/10 hover:shadow-2xl transition-all">
+        <button
+          type="button"
+          onClick={() => handleToggleScrollMode('horizontal')}
+          title="Horizontal Scroll Mode (Scroll wheel moves timeline left/right)"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs transition-all cursor-pointer ${
+            scrollMode === 'horizontal'
+              ? 'bg-[#F59E0B] text-gray-950 font-black shadow-xs'
+              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100 font-bold'
+          }`}
+        >
+          <ArrowLeftRight className="w-3.5 h-3.5" />
+          <span>Horizontal</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleToggleScrollMode('vertical')}
+          title="Vertical Scroll Mode (Scroll wheel moves timeline up/down)"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs transition-all cursor-pointer ${
+            scrollMode === 'vertical'
+              ? 'bg-[#F59E0B] text-gray-950 font-black shadow-xs'
+              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100 font-bold'
+          }`}
+        >
+          <ArrowUpDown className="w-3.5 h-3.5" />
+          <span>Vertical</span>
+        </button>
+      </div>
     </div>
   );
 }
