@@ -22,6 +22,7 @@ function AuthForm() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   React.useEffect(() => {
@@ -33,6 +34,7 @@ function AuthForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setInfoMsg(null);
     setLoading(true);
 
     try {
@@ -45,6 +47,13 @@ function AuthForm() {
         }
       } else {
         const res = await signUp(email, password, name);
+        if (res.requiresEmailConfirmation) {
+          setInfoMsg(res.error || 'Account created! Please check your inbox for the verification link to confirm your account, then sign in.');
+          setMode('signin');
+          setPassword('');
+          setLoading(false);
+          return;
+        }
         if (!res.success) {
           setErrorMsg(res.error || 'Failed to create account.');
           setLoading(false);
@@ -68,6 +77,7 @@ function AuthForm() {
           onClick={() => {
             setMode('signin');
             setErrorMsg(null);
+            setInfoMsg(null);
           }}
           className={`py-2 text-xs font-black tracking-wider uppercase rounded-xl transition-all cursor-pointer ${
             mode === 'signin'
@@ -82,6 +92,7 @@ function AuthForm() {
           onClick={() => {
             setMode('signup');
             setErrorMsg(null);
+            setInfoMsg(null);
           }}
           className={`py-2 text-xs font-black tracking-wider uppercase rounded-xl transition-all cursor-pointer ${
             mode === 'signup'
@@ -104,6 +115,13 @@ function AuthForm() {
             : 'Get started with clean, multi-week delivery schedules.'}
         </p>
       </div>
+
+      {/* Info / Email Confirmation Alert */}
+      {infoMsg && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-semibold mb-5 flex items-start gap-2 leading-relaxed">
+          <span>{infoMsg}</span>
+        </div>
+      )}
 
       {/* Error Alert */}
       {errorMsg && (

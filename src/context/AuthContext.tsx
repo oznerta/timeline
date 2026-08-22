@@ -8,7 +8,7 @@ interface AuthContextType {
   currentUser: User | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  signUp: (email: string, password: string, name: string) => Promise<{ success: boolean; error?: string }>;
+  signUp: (email: string, password: string, name: string) => Promise<{ success: boolean; requiresEmailConfirmation?: boolean; error?: string }>;
   signOut: () => Promise<void>;
 }
 
@@ -57,14 +57,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     restoreSession();
+
+    if (isSupabaseConfigured && supabase) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          const u: User = {
+            id: session.user.id,
+            email: session.user.email || '',
+            name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
+            avatarUrl: session.user.user_metadata?.avatar_url,
+            createdAt: session.user.created_at,
+          };
+          setCurrentUser(u);
+        }
+        setIsLoading(false);
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    }
   }, [restoreSession]);
 
   const signIn = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
       if (isSupabaseConfigured && supabase) {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) return { success: false, error: error.message };
-        if (data.user) {
+        if (error) {
+          if (error.message.toLowerCase().includes('email not confirmed')) {
+            return {
+              success: false,
+              error: 'Your email has not been confirmed yet. Please check your inbox for the verification link (or disable "Confirm email" in Supabase Auth settings).',
+            };
+          }
+          return { success: false, error: error.message };
+        }
+        if (data.user && data.session) {
           const u: User = {
             id: data.user.id,
             email: data.user.email || '',
@@ -98,7 +126,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email: string,
     password: string,
     name: string
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; requiresEmailConfirmation?: boolean; error?: string }> => {
     try {
       if (isSupabaseConfigured && supabase) {
         const { data, error } = await supabase.auth.signUp({
@@ -109,7 +137,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           },
         });
         if (error) return { success: false, error: error.message };
-        if (data.user) {
+
+        // If Supabase requires email verification, session is null
+        if (data.user && !data.session) {
+          return {
+            success: false,
+            requiresEmailConfirmation: true,
+            error: 'Account created! Please check your email to confirm your account before signing in.',
+          };
+        }
+
+        if (data.user && data.session) {
           const u: User = {
             id: data.user.id,
             email: data.user.email || '',
