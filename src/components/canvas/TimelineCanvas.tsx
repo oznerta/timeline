@@ -16,6 +16,7 @@ import {
   Globe,
   Lock,
   LogIn,
+  Mouse,
   Plus,
   Settings,
   Share2,
@@ -2528,34 +2529,43 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
       )}
 
       {/* FLOATING SCROLL DIRECTION TOGGLE WIDGET (BOTTOM-RIGHT) */}
-      <div className="fixed bottom-6 right-6 z-40 flex items-center p-1 bg-white/95 backdrop-blur-md border border-gray-200/90 rounded-2xl shadow-xl shadow-black/10 hover:shadow-2xl transition-all">
-        <button
-          type="button"
-          onClick={() => handleToggleScrollMode('horizontal')}
-          title="Horizontal Scroll Mode (Scroll wheel moves timeline left/right)"
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs transition-all cursor-pointer ${
-            scrollMode === 'horizontal'
-              ? 'bg-[#F59E0B] text-gray-950 font-black shadow-xs'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100 font-bold'
-          }`}
-        >
-          <ArrowLeftRight className="w-3.5 h-3.5" />
-          <span>Horizontal</span>
-        </button>
+      <div className="fixed bottom-6 right-6 z-40 flex items-center gap-1.5 p-1 bg-white/95 backdrop-blur-md border border-gray-200/90 rounded-2xl shadow-xl shadow-black/10 hover:shadow-2xl transition-all select-none">
+        {/* Minimalist Scroll Indicator */}
+        <div className="flex items-center gap-1.5 pl-2.5 pr-1 py-1 text-gray-500">
+          <Mouse className="w-3.5 h-3.5 text-gray-400" />
+          <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">Scroll</span>
+        </div>
 
-        <button
-          type="button"
-          onClick={() => handleToggleScrollMode('vertical')}
-          title="Vertical Scroll Mode (Scroll wheel moves timeline up/down)"
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs transition-all cursor-pointer ${
-            scrollMode === 'vertical'
-              ? 'bg-[#F59E0B] text-gray-950 font-black shadow-xs'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100 font-bold'
-          }`}
-        >
-          <ArrowUpDown className="w-3.5 h-3.5" />
-          <span>Vertical</span>
-        </button>
+        {/* Minimalist Segmented Tabs */}
+        <div className="flex items-center gap-1 bg-gray-100/70 p-0.5 rounded-xl border border-gray-200/40">
+          <button
+            type="button"
+            onClick={() => handleToggleScrollMode('horizontal')}
+            title="Horizontal Scroll Mode (Mouse wheel moves timeline horizontally left/right)"
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-all cursor-pointer ${
+              scrollMode === 'horizontal'
+                ? 'bg-white text-gray-950 font-black shadow-xs border border-gray-200/80'
+                : 'text-gray-500 hover:text-gray-900 font-bold'
+            }`}
+          >
+            <ArrowLeftRight className="w-3 h-3 text-[#D97706]" />
+            <span>Horizontal</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleToggleScrollMode('vertical')}
+            title="Vertical Scroll Mode (Mouse wheel moves timeline vertically up/down)"
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-all cursor-pointer ${
+              scrollMode === 'vertical'
+                ? 'bg-white text-gray-950 font-black shadow-xs border border-gray-200/80'
+                : 'text-gray-500 hover:text-gray-900 font-bold'
+            }`}
+          >
+            <ArrowUpDown className="w-3 h-3 text-[#D97706]" />
+            <span>Vertical</span>
+          </button>
+        </div>
       </div>
     </div>
   );
