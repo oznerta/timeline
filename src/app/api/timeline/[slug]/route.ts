@@ -137,8 +137,8 @@ export async function GET(
     const userId = request.cookies.get('timeline_user_id')?.value;
     const user = userId ? findUserById(userId) : null;
 
-    const accessLevel: AccessLevel = data.project.accessLevel || 'public_view';
-    const isOwner = Boolean(user && (!data.project.userId || user.id === data.project.userId));
+    const accessLevel: AccessLevel = data.project.accessLevel || 'restricted';
+    const isOwner = Boolean(user && data.project.userId && user.id === data.project.userId);
     const collaborator = user
       ? (data.collaborators || []).find(
           (c) => c.email.toLowerCase() === user.email.toLowerCase()

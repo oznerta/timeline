@@ -5,10 +5,11 @@ import Link from 'next/link';
 import { Lock, LogIn, ArrowLeft } from 'lucide-react';
 import { TimelineCanvas } from './TimelineCanvas';
 import { fetchTimelineData, persistTimelineData } from '@/lib/data-service';
-import { defaultTimelineData } from '@/lib/default-data';
 import { TimelineData } from '@/types/timeline';
+import { useAuth } from '@/context/AuthContext';
 
 export function TimelineCanvasWrapper({ slug }: { slug: string }) {
+  const { currentUser, isLoading: isAuthLoading } = useAuth();
   const [data, setData] = useState<TimelineData | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -40,7 +41,7 @@ export function TimelineCanvasWrapper({ slug }: { slug: string }) {
     load();
   }, [slug]);
 
-  if (loading) {
+  if (loading || isAuthLoading) {
     return (
       <div className="h-screen w-full bg-[#F8F9FA] flex flex-col items-center justify-center text-gray-500 text-xs font-bold gap-3 select-none">
         <div className="w-8 h-8 rounded-xl bg-[#F59E0B] text-gray-950 font-black flex items-center justify-center text-sm shadow-md animate-pulse">
@@ -81,8 +82,33 @@ export function TimelineCanvasWrapper({ slug }: { slug: string }) {
     );
   }
 
-  // Restricted Access Screen
-  if (restrictedError?.isRestricted) {
+  // Restricted Access Verification
+  const accessLevel = data?.project?.accessLevel || 'restricted';
+  const isRestricted = accessLevel === 'restricted';
+
+  let hasAccess = true;
+  if (isRestricted && data) {
+    const currentEmail = currentUser?.email?.toLowerCase();
+    const currentUserId = currentUser?.id;
+    const isOwner = Boolean(
+      currentUserId &&
+      data.project.userId &&
+      currentUserId === data.project.userId
+    );
+    const isCollaborator = Boolean(
+      currentEmail &&
+      (data.collaborators || []).some(
+        (c) => c.email.toLowerCase() === currentEmail
+      )
+    );
+
+    if (!isOwner && !isCollaborator) {
+      hasAccess = false;
+    }
+  }
+
+  if (restrictedError?.isRestricted || !hasAccess) {
+    const title = data?.project?.title || restrictedError?.projectTitle || slug;
     return (
       <div className="min-h-screen w-full bg-[#F8F9FA] flex flex-col items-center justify-center p-6 select-none">
         <div className="bg-white border border-gray-200 rounded-3xl p-8 max-w-md w-full shadow-xl flex flex-col items-center text-center gap-5">
@@ -93,8 +119,13 @@ export function TimelineCanvasWrapper({ slug }: { slug: string }) {
           <div className="flex flex-col gap-1.5">
             <h2 className="text-lg font-black text-gray-900">Access Restricted</h2>
             <p className="text-xs text-gray-500 leading-relaxed">
-              &quot;{restrictedError.projectTitle || slug}&quot; is private and only available to invited collaborators.
+              &quot;{title}&quot; is private and only available to invited collaborators.
             </p>
+            {currentUser?.email && (
+              <p className="text-[11px] text-gray-400 mt-1">
+                Signed in as <span className="font-bold text-gray-600">{currentUser.email}</span>
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col w-full gap-2.5 pt-2">
@@ -103,7 +134,7 @@ export function TimelineCanvasWrapper({ slug }: { slug: string }) {
               className="w-full py-2.5 px-4 bg-[#F59E0B] hover:bg-[#D97706] text-gray-950 font-black text-xs rounded-xl transition-all shadow-md shadow-[#F59E0B]/20 flex items-center justify-center gap-2 cursor-pointer"
             >
               <LogIn className="w-4 h-4" />
-              <span>Sign in with authorized account</span>
+              <span>{currentUser ? 'Switch to authorized account' : 'Sign in to access'}</span>
             </Link>
 
             <Link
