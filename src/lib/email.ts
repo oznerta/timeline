@@ -201,6 +201,7 @@ export async function sendCollaboratorInviteEmail(
   });
 
   const subject = `${inviterName} invited you to collaborate on "${timelineTitle}"`;
+  const text = `${inviterName} has invited you to collaborate on their sprint timeline: "${timelineTitle}".\n\nRole: ${permission === 'editor' ? 'Editor (Can edit)' : 'Viewer (Read-only)'}\n\nAccess your timeline here: ${timelineUrl}\n\nIf you don't have a Weekline account yet, simply sign up with this email address to access and edit your assigned tasks.\n\n— Weekline Team`;
 
   // Fallback: If RESEND_API_KEY is not set or is dummy placeholder, simulate dispatch
   if (!apiKey || apiKey.startsWith('re_123456789') || apiKey === 'your-resend-api-key') {
@@ -221,6 +222,7 @@ export async function sendCollaboratorInviteEmail(
       to,
       subject,
       html,
+      text,
     });
 
     if (result.error) {

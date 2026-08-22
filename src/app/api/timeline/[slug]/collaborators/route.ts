@@ -92,7 +92,7 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { email, name, permission = 'editor', action, collaboratorId } = body;
+    const { email, name, permission = 'editor', action, collaboratorId, inviterName } = body;
 
     if (action === 'update_permission' && collaboratorId) {
       if (isSupabaseConfigured && supabase) {
@@ -152,7 +152,7 @@ export async function POST(
     const origin = request.headers.get('origin') || undefined;
     const emailResult = await sendCollaboratorInviteEmail({
       to: email.trim(),
-      inviterName: name || 'A team member',
+      inviterName: inviterName || 'A team member',
       timelineTitle: project.title,
       timelineSlug: slug,
       permission: permission as PermissionLevel,

@@ -538,6 +538,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
 
     setIsInviting(true);
     try {
+      const inviterName = currentUser?.name || currentUser?.email?.split('@')[0] || 'A team member';
       const res = await fetch(`/api/timeline/${slug}/collaborators`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -545,6 +546,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
           email: inviteEmail.trim(),
           name: inviteEmail.split('@')[0],
           permission: invitePermission,
+          inviterName,
         }),
       });
 
