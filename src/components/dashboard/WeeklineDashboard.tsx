@@ -44,6 +44,7 @@ import {
   restoreWorkspaceProject,
   deleteWorkspaceProjectPermanently,
 } from '@/lib/data-service';
+import { getInitials } from '@/lib/default-data';
 
 interface WeeklineDashboardProps {
   timelineData: TimelineData;
@@ -348,7 +349,7 @@ export function WeeklineDashboard({
   }
 
   const activeFolder = folders.find((f) => f.id === activeView);
-  const userInitial = currentUser?.name?.trim() ? currentUser.name.trim().charAt(0).toUpperCase() : 'M';
+  const userInitial = getInitials(currentUser?.name || 'User');
 
   return (
     <div className="flex h-screen w-full bg-[#F8F9FA] text-gray-900 font-sans antialiased overflow-hidden select-none">

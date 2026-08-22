@@ -51,6 +51,23 @@ export function getRandomTagColor(): string {
 }
 
 /**
+ * Single source of truth for generating user initials from any display name
+ * e.g., "Matt Renzo C. Baring" -> "MR", "Sarah Connor" -> "SC", "Maverick" -> "M"
+ */
+export function getInitials(name: string): string {
+  if (!name || !name.trim()) return 'U';
+  const clean = name.trim().replace(/\(You\)/gi, '').trim();
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return `${words[0][0]}${words[1][0]}`.toUpperCase();
+  }
+  if (clean.length >= 2) {
+    return clean.slice(0, 2).toUpperCase();
+  }
+  return clean.toUpperCase();
+}
+
+/**
  * Production-grade dynamic calculation of month header label from an array of days
  */
 export function computeMonthLabelFromDays(days: DayConfig[]): string {

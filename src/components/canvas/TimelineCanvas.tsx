@@ -44,6 +44,7 @@ import {
   normalizeSprintTo7Days,
   computeMonthLabelFromDays,
   CALENDAR_DAY_ORDER,
+  getInitials,
 } from '@/lib/default-data';
 
 interface TimelineCanvasProps {
@@ -632,9 +633,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
       'Matt Renzo C. Baring';
 
     const displayName = isCurrentViewerOwner ? `${currentUser?.name || rawOwnerName} (You)` : rawOwnerName;
-    const initials =
-      savedOwner?.initials ||
-      (rawOwnerName.trim().slice(0, 2) || 'MR').toUpperCase();
+    const initials = getInitials(displayName);
 
     list.push({
       id: ownerId,
@@ -653,7 +652,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
       if (seenIds.has(ass.id) || seenNames.has(normalizedName)) return;
       seenIds.add(ass.id);
       seenNames.add(normalizedName);
-      list.push(ass);
+      list.push({ ...ass, initials: getInitials(ass.name) });
     });
 
     // 3. Include Invited Collaborators
@@ -664,7 +663,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
       seenNames.add(colName.toLowerCase());
 
       const isThisColCurrent = currentUser?.email && col.email.toLowerCase() === currentUser.email.toLowerCase();
-      const initials = (colName.trim().slice(0, 2) || 'CO').toUpperCase();
+      const initials = getInitials(colName);
       list.push({
         id: col.id,
         projectId: data.project.id,
@@ -820,8 +819,8 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                 className="flex items-center -space-x-1.5 cursor-pointer"
                 title="Collaborators on this timeline"
               >
-                <div className="w-6 h-6 rounded-full bg-[#F59E0B] text-gray-950 font-black text-[10px] flex items-center justify-center border-2 border-white shadow-xs">
-                  {(currentUser?.name || 'U').charAt(0).toUpperCase()}
+                <div className="w-6 h-6 rounded-full bg-[#F59E0B] text-gray-950 font-black text-[9px] flex items-center justify-center border-2 border-white shadow-xs">
+                  {getInitials(currentUser?.name || 'U')}
                 </div>
                 {collaborators.slice(0, 3).map((col) => (
                   <div
@@ -829,7 +828,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                     className="w-6 h-6 rounded-full bg-blue-500 text-white font-bold text-[9px] flex items-center justify-center border-2 border-white shadow-xs"
                     title={`${col.name} (${col.permission})`}
                   >
-                    {col.name.charAt(0).toUpperCase()}
+                    {getInitials(col.name || col.email)}
                   </div>
                 ))}
                 {collaborators.length > 3 && (
@@ -2145,7 +2144,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                 <div className="flex items-center justify-between py-2.5">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-900 font-black text-xs flex items-center justify-center border border-amber-200">
-                      {((effectiveAssignees[0]?.name || 'M').trim()[0] || 'M').toUpperCase()}
+                      {getInitials(effectiveAssignees[0]?.name || 'Owner')}
                     </div>
                     <div className="flex flex-col">
                       <span className="text-xs font-bold text-gray-900">
