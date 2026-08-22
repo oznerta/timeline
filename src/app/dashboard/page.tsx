@@ -25,9 +25,22 @@ export default function DashboardPage() {
     startDate?: string
   ) => {
     const rawSlug = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'timeline';
-    const uniqueSlug = `${rawSlug}-${Date.now().toString().slice(-4)}`;
     const starter = createInitialTimeline(title, uniqueSlug, startDate);
-    if (currentUser?.id) starter.project.userId = currentUser.id;
+    if (currentUser?.id) {
+      starter.project.userId = currentUser.id;
+      starter.project.ownerName = currentUser.name;
+      starter.project.ownerEmail = currentUser.email;
+      const initials = (currentUser.name.trim().slice(0, 2) || 'PL').toUpperCase();
+      starter.assignees = [
+        {
+          id: currentUser.id,
+          projectId: starter.project.id,
+          name: currentUser.name,
+          initials,
+          color: '#F59E0B',
+        },
+      ];
+    }
     if (folderId) starter.project.folderId = folderId;
     await persistTimelineData(starter);
     router.push(`/t/${uniqueSlug}`);

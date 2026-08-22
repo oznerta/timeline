@@ -42,6 +42,8 @@ export interface Project {
   brandName?: string;
   status?: 'active' | 'archived' | 'completed' | 'trashed';
   accessLevel?: AccessLevel;
+  ownerName?: string;
+  ownerEmail?: string;
   isFavorite?: boolean;
   isTrashed?: boolean;
   isShared?: boolean;

@@ -608,50 +608,72 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
     setTimeout(() => setCopiedLink(false), 2500);
   };
 
-  // Effective Assignees = Timeline Owner + Invited Collaborators
+  // Effective Assignees = Timeline Owner + Saved Assignees + Invited Collaborators
   const effectiveAssignees: Assignee[] = useMemo(() => {
     const list: Assignee[] = [];
     const seenIds = new Set<string>();
-    const seenEmails = new Set<string>();
+    const seenNames = new Set<string>();
 
-    // 1. Owner / Creator
-    const ownerName = currentUser?.name || 'Owner';
-    const ownerInitials = (ownerName.trim().slice(0, 2) || 'OW').toUpperCase();
-    const ownerId = currentUser?.id || data.project.userId || 'owner';
-    const ownerEmail = (currentUser?.email || '').trim().toLowerCase();
+    // 1. Resolve Owner / Creator
+    const isCurrentViewerOwner = Boolean(
+      currentUser?.id && data.project.userId && currentUser.id === data.project.userId
+    );
+
+    // Find saved owner from data.assignees or data.project
+    const savedOwner = (data.assignees || []).find(
+      (a) => a.id === data.project.userId || a.id.startsWith('assignee-') || a.id === 'owner'
+    ) || (data.assignees && data.assignees.length > 0 ? data.assignees[0] : null);
+
+    const ownerId = data.project.userId || savedOwner?.id || currentUser?.id || 'owner';
+    const rawOwnerName =
+      data.project.ownerName ||
+      (savedOwner && savedOwner.name !== 'Owner' && savedOwner.name !== 'Lead' ? savedOwner.name : null) ||
+      (isCurrentViewerOwner ? currentUser?.name : null) ||
+      'Matt Renzo C. Baring';
+
+    const displayName = isCurrentViewerOwner ? `${currentUser?.name || rawOwnerName} (You)` : rawOwnerName;
+    const initials =
+      savedOwner?.initials ||
+      (rawOwnerName.trim().slice(0, 2) || 'MR').toUpperCase();
 
     list.push({
       id: ownerId,
       projectId: data.project.id,
-      name: currentUser ? `${currentUser.name} (You)` : 'Owner',
-      initials: ownerInitials,
-      color: '#F59E0B',
+      name: displayName,
+      initials,
+      color: savedOwner?.color || '#F59E0B',
     });
     seenIds.add(ownerId);
-    if (ownerEmail) seenEmails.add(ownerEmail);
+    seenNames.add(rawOwnerName.toLowerCase());
 
-    // 2. Invited Collaborators
+    // 2. Include any other saved assignees from data.assignees
+    (data.assignees || []).forEach((ass) => {
+      if (seenIds.has(ass.id) || seenNames.has(ass.name.toLowerCase())) return;
+      seenIds.add(ass.id);
+      seenNames.add(ass.name.toLowerCase());
+      list.push(ass);
+    });
+
+    // 3. Include Invited Collaborators
     (collaborators || []).forEach((col) => {
-      const colEmail = (col.email || '').trim().toLowerCase();
-      if (colEmail && seenEmails.has(colEmail)) return;
-      if (seenIds.has(col.id)) return;
-
-      if (colEmail) seenEmails.add(colEmail);
+      const colName = col.name || col.email.split('@')[0];
+      if (seenIds.has(col.id) || seenNames.has(colName.toLowerCase())) return;
       seenIds.add(col.id);
+      seenNames.add(colName.toLowerCase());
 
-      const name = col.name || col.email.split('@')[0];
-      const initials = (name.trim().slice(0, 2) || 'CO').toUpperCase();
+      const isThisColCurrent = currentUser?.email && col.email.toLowerCase() === currentUser.email.toLowerCase();
+      const initials = (colName.trim().slice(0, 2) || 'CO').toUpperCase();
       list.push({
         id: col.id,
         projectId: data.project.id,
-        name: col.name || col.email,
+        name: isThisColCurrent ? `${colName} (You)` : colName,
         initials,
         color: '#2563EB',
       });
     });
 
     return list;
-  }, [currentUser, data.project.id, data.project.userId, collaborators]);
+  }, [currentUser, data.project, data.assignees, collaborators]);
 
   // Maps for efficient lookup
   const assigneeMap = useMemo(() => {
@@ -2146,16 +2168,18 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                 <div className="flex items-center justify-between py-2.5">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-900 font-black text-xs flex items-center justify-center border border-amber-200">
-                      {(currentUser?.name?.trim() ? currentUser.name.trim()[0] : 'M').toUpperCase()}
+                      {((effectiveAssignees[0]?.name || 'M').trim()[0] || 'M').toUpperCase()}
                     </div>
                     <div className="flex flex-col">
                       <span className="text-xs font-bold text-gray-900">
-                        {currentUser?.name || 'Owner'} <span className="text-gray-400 font-medium">(You)</span>
+                        {effectiveAssignees[0]?.name || 'Owner'}
                       </span>
-                      <span className="text-[11px] text-gray-400">{currentUser?.email}</span>
+                      <span className="text-[11px] text-gray-400">
+                        {data.project.ownerEmail || (isOwner ? currentUser?.email : '')}
+                      </span>
                     </div>
                   </div>
-                  <span className="text-[11px] font-bold text-gray-400 pr-1">
+                  <span className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
                     Owner
                   </span>
                 </div>
