@@ -186,7 +186,7 @@ export function getDb(): Database.Database {
   ensureColumn(dbInstance, 'projects', 'subtitle', 'TEXT');
   ensureColumn(dbInstance, 'projects', 'client_name', 'TEXT');
   ensureColumn(dbInstance, 'projects', 'brand_name', 'TEXT');
-  ensureColumn(dbInstance, 'projects', 'access_level', 'TEXT DEFAULT "public_view"');
+  ensureColumn(dbInstance, 'projects', 'access_level', 'TEXT DEFAULT "restricted"');
   ensureColumn(dbInstance, 'tasks', 'tag_id', 'TEXT');
   ensureColumn(dbInstance, 'tasks', 'assignee_ids', 'TEXT');
 
