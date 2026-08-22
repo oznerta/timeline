@@ -1,7 +1,9 @@
 import {
   Assignee,
   CategoryTrack,
+  Collaborator,
   Folder,
+  PermissionLevel,
   Project,
   Sprint,
   Tag,
@@ -75,13 +77,14 @@ export async function fetchTimelineData(slug: string = 'master-schedule'): Promi
       if (!projErr && projectData) {
         const projId = projectData.id;
 
-        const [sprintsRes, catsRes, assigneesRes, tagsRes, tasksRes] =
+        const [sprintsRes, catsRes, assigneesRes, tagsRes, tasksRes, colRes] =
           await Promise.all([
             supabase.from('sprints').select('*').eq('project_id', projId).order('order_index'),
             supabase.from('category_tracks').select('*').eq('project_id', projId).order('order_index'),
             supabase.from('assignees').select('*').eq('project_id', projId),
             supabase.from('tags').select('*').eq('project_id', projId),
             supabase.from('tasks').select('*').eq('project_id', projId),
+            supabase.from('collaborators').select('*').eq('project_id', projId),
           ]);
 
         const project: Project = {
@@ -139,6 +142,15 @@ export async function fetchTimelineData(slug: string = 'master-schedule'): Promi
           orderIndex: t.order_index,
         }));
 
+        const collaborators: Collaborator[] = (colRes.data || []).map((c: any) => ({
+          id: c.id,
+          projectId: c.project_id,
+          email: c.email,
+          name: c.name || c.email.split('@')[0],
+          permission: c.permission || 'editor',
+          invitedAt: c.created_at,
+        }));
+
         const tasks: TaskCard[] = (tasksRes.data || []).map((t) => {
           let assigneeIds = t.assignee_ids || [];
           if (typeof assigneeIds === 'string') {
@@ -178,6 +190,7 @@ export async function fetchTimelineData(slug: string = 'master-schedule'): Promi
           assignees,
           tags,
           tasks,
+          collaborators,
         };
 
         saveTimelineToLocalStorage(fullData);
@@ -224,6 +237,15 @@ export async function persistTimelineData(data: TimelineData): Promise<void> {
         updated_at: new Date().toISOString(),
       });
 
+      // Synchronize Sprints (delete removed, upsert active)
+      const currentSprintIds = data.sprints.map((s) => s.id);
+      if (currentSprintIds.length > 0) {
+        await supabase
+          .from('sprints')
+          .delete()
+          .eq('project_id', data.project.id)
+          .not('id', 'in', `(${currentSprintIds.map((id) => `"${id}"`).join(',')})`);
+      }
       for (const sprint of data.sprints) {
         await supabase.from('sprints').upsert({
           id: sprint.id,
@@ -241,6 +263,15 @@ export async function persistTimelineData(data: TimelineData): Promise<void> {
         });
       }
 
+      // Synchronize Category Tracks (delete removed, upsert active)
+      const currentCatIds = data.categories.map((c) => c.id);
+      if (currentCatIds.length > 0) {
+        await supabase
+          .from('category_tracks')
+          .delete()
+          .eq('project_id', data.project.id)
+          .not('id', 'in', `(${currentCatIds.map((id) => `"${id}"`).join(',')})`);
+      }
       for (const cat of data.categories) {
         await supabase.from('category_tracks').upsert({
           id: cat.id,
@@ -251,6 +282,15 @@ export async function persistTimelineData(data: TimelineData): Promise<void> {
         });
       }
 
+      // Synchronize Assignees (delete removed, upsert active)
+      const currentAssIds = data.assignees.map((a) => a.id);
+      if (currentAssIds.length > 0) {
+        await supabase
+          .from('assignees')
+          .delete()
+          .eq('project_id', data.project.id)
+          .not('id', 'in', `(${currentAssIds.map((id) => `"${id}"`).join(',')})`);
+      }
       for (const ass of data.assignees) {
         await supabase.from('assignees').upsert({
           id: ass.id,
@@ -261,6 +301,17 @@ export async function persistTimelineData(data: TimelineData): Promise<void> {
         });
       }
 
+      // Synchronize Tags (delete removed, upsert active)
+      const currentTagIds = (data.tags || []).map((t) => t.id);
+      if (currentTagIds.length > 0) {
+        await supabase
+          .from('tags')
+          .delete()
+          .eq('project_id', data.project.id)
+          .not('id', 'in', `(${currentTagIds.map((id) => `"${id}"`).join(',')})`);
+      } else {
+        await supabase.from('tags').delete().eq('project_id', data.project.id);
+      }
       if (data.tags && data.tags.length > 0) {
         for (const tag of data.tags) {
           await supabase.from('tags').upsert({
@@ -273,10 +324,25 @@ export async function persistTimelineData(data: TimelineData): Promise<void> {
         }
       }
 
+      // Synchronize Tasks (delete removed, upsert active)
+      const currentTaskIds = data.tasks.map((t) => t.id);
+      if (currentTaskIds.length > 0) {
+        await supabase
+          .from('tasks')
+          .delete()
+          .eq('project_id', data.project.id)
+          .not('id', 'in', `(${currentTaskIds.map((id) => `"${id}"`).join(',')})`);
+      } else {
+        await supabase.from('tasks').delete().eq('project_id', data.project.id);
+      }
+
       for (const task of data.tasks) {
-        const taskAssigneeIds = task.assigneeIds && task.assigneeIds.length > 0
-          ? task.assigneeIds
-          : (task.assigneeId ? [task.assigneeId] : []);
+        const taskAssigneeIds =
+          task.assigneeIds && task.assigneeIds.length > 0
+            ? task.assigneeIds
+            : task.assigneeId
+            ? [task.assigneeId]
+            : [];
 
         await supabase.from('tasks').upsert({
           id: task.id,
