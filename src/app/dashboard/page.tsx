@@ -25,6 +25,7 @@ export default function DashboardPage() {
     startDate?: string
   ) => {
     const rawSlug = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'timeline';
+    const uniqueSlug = `${rawSlug}-${Date.now().toString().slice(-4)}`;
     const starter = createInitialTimeline(title, uniqueSlug, startDate);
     if (currentUser?.id) {
       starter.project.userId = currentUser.id;
