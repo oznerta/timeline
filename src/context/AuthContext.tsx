@@ -21,6 +21,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const restoreSession = useCallback(async () => {
     try {
       if (isSupabaseConfigured && supabase) {
+        // Handle Supabase Email Confirmation URL Hash (#access_token=...&refresh_token=...)
+        if (typeof window !== 'undefined' && window.location.hash && window.location.hash.includes('access_token=')) {
+          const hashParams = new URLSearchParams(window.location.hash.substring(1));
+          const accessToken = hashParams.get('access_token');
+          const refreshToken = hashParams.get('refresh_token');
+
+          if (accessToken && refreshToken) {
+            const { data, error } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+
+            if (!error && data.session?.user) {
+              // Clean the long hash string from URL
+              window.history.replaceState(null, '', '/dashboard');
+              const u: User = {
+                id: data.session.user.id,
+                email: data.session.user.email || '',
+                name: data.session.user.user_metadata?.name || data.session.user.email?.split('@')[0] || 'User',
+                avatarUrl: data.session.user.user_metadata?.avatar_url,
+                createdAt: data.session.user.created_at,
+              };
+              setCurrentUser(u);
+              setIsLoading(false);
+              return;
+            }
+          }
+        }
+
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           const u: User = {
