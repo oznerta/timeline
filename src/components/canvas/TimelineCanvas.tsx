@@ -627,10 +627,11 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
 
     const ownerId = data.project.userId || savedOwner?.id || currentUser?.id || 'owner';
     const rawOwnerName =
+      (isCurrentViewerOwner ? currentUser?.name : null) ||
       data.project.ownerName ||
       (savedOwner && savedOwner.name !== 'Owner' && savedOwner.name !== 'Lead' ? savedOwner.name : null) ||
-      (isCurrentViewerOwner ? currentUser?.name : null) ||
-      'Matt Renzo C. Baring';
+      currentUser?.name ||
+      'Timeline Owner';
 
     const displayName = isCurrentViewerOwner ? `${currentUser?.name || rawOwnerName} (You)` : rawOwnerName;
     const initials = getInitials(displayName);
