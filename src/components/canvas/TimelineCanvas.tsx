@@ -1449,7 +1449,8 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                                     <span
                                       key={a.id}
                                       title={a.name}
-                                      className="text-[9.5px] font-black bg-black/40 text-white px-1.5 py-0.5 rounded-md border border-white/20 shadow-xs uppercase"
+                                      className="w-5 h-5 rounded-full text-[9px] font-black flex items-center justify-center text-white border-1.5 border-white/90 shrink-0 shadow-xs uppercase tracking-tight"
+                                      style={{ backgroundColor: a.color || '#F59E0B' }}
                                     >
                                       {a.initials}
                                     </span>
