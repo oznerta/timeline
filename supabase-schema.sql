@@ -1,5 +1,6 @@
 -- ==========================================================
 -- PRODUCTION SUPABASE SCHEMA: WEEKLINE TIMELINE PLATFORM
+-- (100% Idempotent - Safe to run repeatedly in SQL Editor)
 -- ==========================================================
 
 -- Enable UUID extension
@@ -52,11 +53,15 @@ CREATE TABLE IF NOT EXISTS projects (
   client_name TEXT,
   brand_name TEXT,
   access_level TEXT NOT NULL DEFAULT 'restricted',
+  settings JSONB NOT NULL DEFAULT '{}'::jsonb,
   is_favorite BOOLEAN NOT NULL DEFAULT false,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure settings column exists if table was created in an older migration
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS settings JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- 5. Collaborators
 CREATE TABLE IF NOT EXISTS collaborators (
@@ -128,6 +133,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   assignee_id TEXT DEFAULT '',
   assignee_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
   day_id TEXT NOT NULL,
+  day_span INT NOT NULL DEFAULT 1,
   title TEXT NOT NULL DEFAULT '',
   deliverables JSONB NOT NULL DEFAULT '[]'::jsonb,
   deliverable_items JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -137,6 +143,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure columns exist if tasks table was created in an older migration
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS day_span INT NOT NULL DEFAULT 1;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assignee_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deliverable_items JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- ==========================================================
 -- INDEXES FOR HIGH-PERFORMANCE QUERYING
@@ -169,14 +180,33 @@ ALTER TABLE assignees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tags ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
 
--- Allow full access for application operations
+-- Idempotent RLS Policy Setup (Drop existing before recreating)
+DROP POLICY IF EXISTS "Full access for organizations" ON organizations;
 CREATE POLICY "Full access for organizations" ON organizations FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Full access for users" ON users;
 CREATE POLICY "Full access for users" ON users FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Full access for folders" ON folders;
 CREATE POLICY "Full access for folders" ON folders FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Full access for projects" ON projects;
 CREATE POLICY "Full access for projects" ON projects FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Full access for collaborators" ON collaborators;
 CREATE POLICY "Full access for collaborators" ON collaborators FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Full access for sprints" ON sprints;
 CREATE POLICY "Full access for sprints" ON sprints FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Full access for category_tracks" ON category_tracks;
 CREATE POLICY "Full access for category_tracks" ON category_tracks FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Full access for assignees" ON assignees;
 CREATE POLICY "Full access for assignees" ON assignees FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Full access for tags" ON tags;
 CREATE POLICY "Full access for tags" ON tags FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Full access for tasks" ON tasks;
 CREATE POLICY "Full access for tasks" ON tasks FOR ALL USING (true) WITH CHECK (true);

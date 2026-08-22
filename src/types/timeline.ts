@@ -48,6 +48,11 @@ export interface Project {
   isTrashed?: boolean;
   isShared?: boolean;
   sharedBy?: string;
+  settings?: {
+    visibleDays?: string[];
+    selectedWeeks?: number[];
+    [key: string]: any;
+  };
   createdAt?: string;
   updatedAt?: string;
 }
@@ -127,6 +132,7 @@ export interface TaskCard {
   assigneeId?: string;
   assigneeIds?: string[];
   dayId: string;
+  daySpan?: number;
   title: string;
   deliverables?: string[];
   deliverableItems?: DeliverableItem[];

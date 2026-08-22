@@ -2,7 +2,9 @@
 
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowLeftRight,
   ArrowUpDown,
@@ -14,6 +16,7 @@ import {
   Edit3,
   Eye,
   Globe,
+  Loader2,
   Lock,
   LogIn,
   Mouse,
@@ -23,6 +26,8 @@ import {
   SlidersHorizontal,
   Tag as TagIcon,
   Trash2,
+  Undo2,
+  Redo2,
   User as UserIcon,
   UserPlus,
   Users,
@@ -49,6 +54,14 @@ import {
   CALENDAR_DAY_ORDER,
   getInitials,
 } from '@/lib/default-data';
+import {
+  calculateVisibleProjection,
+  checkTaskCollision,
+  getMaxResizeSpan,
+  repositionTasksWithMode,
+  ReorderMode,
+} from '@/lib/timeline-scheduler';
+import { useTimelineHistory } from '@/hooks/useTimelineHistory';
 
 interface TimelineCanvasProps {
   initialData: TimelineData;
@@ -61,11 +74,16 @@ const WORKDAYS_LIST = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
 export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvasProps) {
   const { currentUser } = useAuth();
-  const [data, setData] = useState<TimelineData>(() => ({
-    ...initialData,
-    sprints: (initialData.sprints || []).map(normalizeSprintTo7Days),
-    tags: initialData.tags || [],
-  }));
+  const [data, setData, historyControls] = useTimelineHistory(
+    useMemo(
+      () => ({
+        ...initialData,
+        sprints: (initialData.sprints || []).map(normalizeSprintTo7Days),
+        tags: initialData.tags || [],
+      }),
+      [initialData]
+    )
+  );
 
   const [activeSprintIndex] = useState(0);
   const activeSprint = data.sprints[activeSprintIndex] || data.sprints[0];
@@ -151,12 +169,67 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
   const [isAssigneeFilterOpen, setIsAssigneeFilterOpen] = useState(false);
   const [selectedTagFilter, setSelectedTagFilter] = useState<string>('all');
   const [isTagFilterOpen, setIsTagFilterOpen] = useState(false);
-  const [selectedDays, setSelectedDays] = useState<string[]>(ALL_DAYS_LIST);
+  const [selectedDays, setSelectedDays] = useState<string[]>(() => {
+    if (initialData.project.settings?.visibleDays && Array.isArray(initialData.project.settings.visibleDays) && initialData.project.settings.visibleDays.length > 0) {
+      return initialData.project.settings.visibleDays;
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(`weekline_days_${slug}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (_) {}
+    }
+    return ALL_DAYS_LIST;
+  });
   const [isDaysDrawerOpen, setIsDaysDrawerOpen] = useState(false);
-  const [selectedWeeks, setSelectedWeeks] = useState<number[]>(allWeekNumbers.length > 0 ? allWeekNumbers : [1, 2, 3, 4]);
+  const [selectedWeeks, setSelectedWeeks] = useState<number[]>(() => {
+    if (initialData.project.settings?.selectedWeeks && Array.isArray(initialData.project.settings.selectedWeeks) && initialData.project.settings.selectedWeeks.length > 0) {
+      return initialData.project.settings.selectedWeeks;
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(`weekline_weeks_${slug}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (_) {}
+    }
+    return allWeekNumbers.length > 0 ? allWeekNumbers : [1, 2, 3, 4];
+  });
   const [isWeekDrawerOpen, setIsWeekDrawerOpen] = useState(false);
 
+  const router = useRouter();
   const [isSaved, setIsSaved] = useState(true);
+  const [showUnsavedWarningModal, setShowUnsavedWarningModal] = useState(false);
+  const [pendingNavigationUrl, setPendingNavigationUrl] = useState<string | null>(null);
+
+  // Guard against closing tab, refreshing, or hard navigation while auto-saving
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!isSaved) {
+        e.preventDefault();
+        e.returnValue = 'Your changes are still saving. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isSaved]);
+
+  const handleNavigateWithGuard = (url: string) => {
+    if (!isSaved) {
+      setPendingNavigationUrl(url);
+      setShowUnsavedWarningModal(true);
+    } else {
+      router.push(url);
+    }
+  };
+
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -165,6 +238,172 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
   const [isTaskAssigneeDropdownOpen, setIsTaskAssigneeDropdownOpen] = useState(false);
   const [isSharePermissionDropdownOpen, setIsSharePermissionDropdownOpen] = useState(false);
   const [isShareAccessDropdownOpen, setIsShareAccessDropdownOpen] = useState(false);
+
+  // Context Menu State for Task Cards
+  const [contextMenuState, setContextMenuState] = useState<{
+    isOpen: boolean;
+    x: number;
+    y: number;
+    task: TaskCard;
+  } | null>(null);
+
+  // Effective Assignees = Timeline Owner + Saved Assignees + Invited Collaborators
+  const effectiveAssignees: Assignee[] = useMemo(() => {
+    const list: Assignee[] = [];
+    const seenIds = new Set<string>();
+    const seenNames = new Set<string>();
+
+    // 1. Resolve Owner / Creator
+    const isCurrentViewerOwner = Boolean(
+      currentUser?.id && data.project.userId && currentUser.id === data.project.userId
+    );
+
+    // Find saved owner from data.assignees or data.project
+    const savedOwner = (data.assignees || []).find(
+      (a) => a.id === data.project.userId || a.id.startsWith('assignee-') || a.id === 'owner'
+    ) || (data.assignees && data.assignees.length > 0 ? data.assignees[0] : null);
+
+    const ownerId = data.project.userId || savedOwner?.id || currentUser?.id || 'owner';
+    const rawOwnerName =
+      (isCurrentViewerOwner ? currentUser?.name : null) ||
+      data.project.ownerName ||
+      (savedOwner && savedOwner.name !== 'Owner' && savedOwner.name !== 'Lead' ? savedOwner.name : null) ||
+      currentUser?.name ||
+      'Timeline Owner';
+
+    const displayName = isCurrentViewerOwner ? `${currentUser?.name || rawOwnerName} (You)` : rawOwnerName;
+    const initials = getInitials(displayName);
+
+    list.push({
+      id: ownerId,
+      projectId: data.project.id,
+      name: displayName,
+      initials,
+      color: savedOwner?.color || '#F59E0B',
+    });
+    seenIds.add(ownerId);
+    seenNames.add(rawOwnerName.toLowerCase());
+
+    // 2. Include any other saved assignees from data.assignees (excluding legacy placeholders)
+    (data.assignees || []).forEach((ass) => {
+      const normalizedName = (ass.name || '').trim().toLowerCase();
+      if (normalizedName === 'lead' || normalizedName === 'owner' || ass.id.startsWith('assignee-')) return;
+      if (seenIds.has(ass.id) || seenNames.has(normalizedName)) return;
+      seenIds.add(ass.id);
+      seenNames.add(normalizedName);
+      list.push({ ...ass, initials: getInitials(ass.name) });
+    });
+
+    // 3. Include Invited Collaborators
+    (collaborators || []).forEach((col) => {
+      const colName = col.name || col.email.split('@')[0];
+      if (seenIds.has(col.id) || seenNames.has(colName.toLowerCase())) return;
+      seenIds.add(col.id);
+      seenNames.add(colName.toLowerCase());
+
+      const isThisColCurrent = currentUser?.email && col.email.toLowerCase() === currentUser.email.toLowerCase();
+      const initials = getInitials(colName);
+      list.push({
+        id: col.id,
+        projectId: data.project.id,
+        name: isThisColCurrent ? `${colName} (You)` : colName,
+        initials,
+        color: '#2563EB',
+      });
+    });
+
+    return list;
+  }, [currentUser, data.project, data.assignees, collaborators]);
+
+  // Maps for efficient lookup
+  const assigneeMap = useMemo(() => {
+    const map = new Map<string, Assignee>();
+    effectiveAssignees.forEach((a) => map.set(a.id, a));
+
+    // Handle project owner alternate ID mapping if needed
+    if (currentUser?.id && data.project.userId && currentUser.id !== data.project.userId) {
+      const ownerAssignee = effectiveAssignees.find((a) => a.id === currentUser.id || a.id === data.project.userId);
+      if (ownerAssignee) {
+        map.set(data.project.userId, ownerAssignee);
+        map.set(currentUser.id, ownerAssignee);
+      }
+    }
+    return map;
+  }, [effectiveAssignees, currentUser?.id, data.project.userId]);
+
+  const tagMap = useMemo(() => {
+    const map = new Map<string, Tag>();
+    (data.tags || []).forEach((t) => map.set(t.id, t));
+    return map;
+  }, [data.tags]);
+
+  // Filtered displayed days based on selected weeks AND selected days in strict calendar order
+  const displayDays = useMemo(() => {
+    return activeSprint.days
+      .filter((d) => selectedWeeks.includes(d.weekNumber) && selectedDays.includes(d.dayName))
+      .sort((a, b) => {
+        if (a.weekNumber !== b.weekNumber) return a.weekNumber - b.weekNumber;
+        return (CALENDAR_DAY_ORDER[a.dayName.toLowerCase()] ?? 0) - (CALENDAR_DAY_ORDER[b.dayName.toLowerCase()] ?? 0);
+      });
+  }, [activeSprint.days, selectedWeeks, selectedDays]);
+
+  // Production-grade dynamic calculation of the Month(s) currently displayed
+  const displayedMonthLabel = useMemo(() => {
+    return computeMonthLabelFromDays(displayDays);
+  }, [displayDays]);
+
+  // Filtered displayed week groups based on selected weeks and selected days
+  const displayWeekGroups = useMemo(() => {
+    return allWeekGroups
+      .filter((w) => selectedWeeks.includes(w.weekNumber))
+      .map((w) => {
+        // Get all matching days in this week that are currently selected
+        const matchingDays = activeSprint.days.filter(
+          (d) => d.weekNumber === w.weekNumber && selectedDays.includes(d.dayName)
+        );
+
+        if (matchingDays.length === 0) {
+          return { ...w, daySpan: 0, dateRange: '' };
+        }
+
+        const firstDay = matchingDays[0];
+        const lastDay = matchingDays[matchingDays.length - 1];
+
+        let dynamicDateRange = '';
+        if (matchingDays.length === 1) {
+          dynamicDateRange = `${firstDay.dayName} ${firstDay.dayNum}`;
+        } else {
+          dynamicDateRange = `${firstDay.dayName} ${firstDay.dayNum} – ${lastDay.dayName} ${lastDay.dayNum}`;
+        }
+
+        return {
+          ...w,
+          daySpan: matchingDays.length,
+          dateRange: dynamicDateRange,
+        };
+      })
+      .filter((w) => w.daySpan > 0);
+  }, [allWeekGroups, selectedWeeks, selectedDays, activeSprint.days]);
+
+  // Filter tasks on the canvas based on Assignee filter and Tag filter
+  const filteredTasks = useMemo(() => {
+    return data.tasks.filter((t) => {
+      if (selectedAssigneeFilter !== 'all') {
+        const taskAssigneeIds = t.assigneeIds && t.assigneeIds.length > 0
+          ? t.assigneeIds
+          : (t.assigneeId ? [t.assigneeId] : []);
+        if (!taskAssigneeIds.includes(selectedAssigneeFilter)) {
+          return false;
+        }
+      }
+      if (selectedTagFilter !== 'all' && t.tagId !== selectedTagFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [data.tasks, selectedAssigneeFilter, selectedTagFilter]);
+
+  const columnTemplate = `240px repeat(${displayDays.length}, 190px)`;
 
   // Scroll Direction Mode: 'horizontal' | 'vertical'
   const gridContainerRef = useRef<HTMLDivElement>(null);
@@ -210,6 +449,19 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
   const [selectedTask, setSelectedTask] = useState<TaskCard | null>(null);
   const [newDeliverableText, setNewDeliverableText] = useState('');
 
+  // Drag & Drop Re-ordering & Collision State
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [dragOverDayId, setDragOverDayId] = useState<string | null>(null);
+  const [dragOverCategoryId, setDragOverCategoryId] = useState<string | null>(null);
+  const [collisionModalState, setCollisionModalState] = useState<{
+    isOpen: boolean;
+    movingTaskId: string;
+    targetDayId: string;
+    targetCategoryId: string;
+    conflictingTaskTitle: string;
+    targetDayLabel: string;
+  } | null>(null);
+
   // Work Stream Management State
   const [isAddTrackOpen, setIsAddTrackOpen] = useState(false);
   const [newTrackTitle, setNewTrackTitle] = useState('');
@@ -233,8 +485,159 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
         console.error('Failed to save timeline data:', e);
       }
     },
-    [onSaveData]
+    [onSaveData, setData]
   );
+
+  const handleUndo = useCallback(async () => {
+    if (isReadOnly || !historyControls.canUndo) return;
+    const previous = historyControls.undo();
+    if (previous) {
+      setIsSaved(false);
+      try {
+        await onSaveData(previous);
+        setIsSaved(true);
+      } catch (e) {
+        console.error('Failed to save undone timeline data:', e);
+      }
+    }
+  }, [isReadOnly, historyControls, onSaveData]);
+
+  const handleRedo = useCallback(async () => {
+    if (isReadOnly || !historyControls.canRedo) return;
+    const next = historyControls.redo();
+    if (next) {
+      setIsSaved(false);
+      try {
+        await onSaveData(next);
+        setIsSaved(true);
+      } catch (e) {
+        console.error('Failed to save redone timeline data:', e);
+      }
+    }
+  }, [isReadOnly, historyControls, onSaveData]);
+
+  // Quick Card Duplicate Handler (Alt+Drag, Ctrl+D, and Right-Click Menu)
+  const handleDuplicateTask = useCallback(
+    (
+      taskToDuplicate: TaskCard,
+      targetDayId?: string,
+      targetCategoryId?: string
+    ) => {
+      if (isReadOnly) return;
+
+      const newTaskId = `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const destCategoryId = targetCategoryId || taskToDuplicate.categoryId;
+
+      // Determine destination day ID
+      let destDayId = targetDayId;
+      if (!destDayId) {
+        // If not specified, find next available working day in active displayDays
+        const currDayIdx = displayDays.findIndex((d) => d.id === taskToDuplicate.dayId);
+        if (currDayIdx !== -1 && currDayIdx + 1 < displayDays.length) {
+          destDayId = displayDays[currDayIdx + 1].id;
+        } else {
+          destDayId = taskToDuplicate.dayId;
+        }
+      }
+
+      // Clone deliverables with fresh IDs
+      const clonedDeliverableItems = (taskToDuplicate.deliverableItems || []).map((item, idx) => ({
+        id: `del-${newTaskId}-${idx}`,
+        text: item.text,
+        isCompleted: false,
+      }));
+
+      const clonedTask: TaskCard = {
+        ...taskToDuplicate,
+        id: newTaskId,
+        categoryId: destCategoryId,
+        dayId: destDayId,
+        title: taskToDuplicate.title,
+        deliverableItems: clonedDeliverableItems,
+        deliverables: clonedDeliverableItems.map((i) => i.text),
+        progressPercentage: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Check collision on destination track
+      const trackTasks = data.tasks.filter(
+        (t) => t.sprintId === activeSprint.id && t.categoryId === destCategoryId
+      );
+      const collision = checkTaskCollision(
+        displayDays,
+        trackTasks,
+        newTaskId,
+        destDayId,
+        clonedTask.daySpan || 1
+      );
+
+      if (collision.hasCollision) {
+        // Automatically cascade push right to accommodate the new duplicate cleanly
+        const reordered = repositionTasksWithMode(
+          displayDays,
+          [...trackTasks, clonedTask],
+          newTaskId,
+          destDayId,
+          'push_right'
+        );
+        const otherTasks = data.tasks.filter(
+          (t) => !(t.sprintId === activeSprint.id && t.categoryId === destCategoryId)
+        );
+        handlePersistChanges({ ...data, tasks: [...otherTasks, ...reordered] });
+      } else {
+        handlePersistChanges({ ...data, tasks: [...data.tasks, clonedTask] });
+      }
+
+      setContextMenuState(null);
+    },
+    [isReadOnly, displayDays, data, activeSprint.id, handlePersistChanges]
+  );
+
+  // Global Keyboard Shortcuts (Ctrl+Z / Ctrl+Y / Cmd+Z / Cmd+Shift+Z / Ctrl+D)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore when user is actively editing inside an input, textarea, or contenteditable
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+      const modifier = isMac ? e.metaKey : e.ctrlKey;
+
+      if (!modifier) return;
+
+      // Undo: Ctrl+Z / Cmd+Z (without Shift)
+      if (e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      }
+      // Redo: Ctrl+Y / Cmd+Y or Ctrl+Shift+Z / Cmd+Shift+Z
+      else if (
+        e.key.toLowerCase() === 'y' ||
+        (e.key.toLowerCase() === 'z' && e.shiftKey)
+      ) {
+        e.preventDefault();
+        handleRedo();
+      }
+      // Duplicate: Ctrl+D / Cmd+D
+      else if (e.key.toLowerCase() === 'd' && !e.shiftKey) {
+        if (selectedTask) {
+          e.preventDefault();
+          handleDuplicateTask(selectedTask);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo, handleDuplicateTask, selectedTask]);
 
   // Add Week functionality
   const handleAddWeek = () => {
@@ -275,6 +678,154 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
     handlePersistChanges(updatedData);
   };
 
+  // Bounded Drag-to-Resize Handler (Stops at next card)
+  const handleStartResize = (
+    e: React.MouseEvent,
+    taskId: string,
+    currentSpan: number,
+    startDayId: string
+  ) => {
+    if (isReadOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const movingTask = data.tasks.find((x) => x.id === taskId);
+    if (!movingTask) return;
+
+    const startX = e.clientX;
+    const colWidth = 190;
+    const targetTrackTasks = data.tasks.filter(
+      (t) => t.sprintId === activeSprint.id && t.categoryId === movingTask.categoryId
+    );
+    const maxAllowedSpan = getMaxResizeSpan(displayDays, targetTrackTasks, taskId, startDayId);
+    let latestSpan = currentSpan;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const stepDelta = Math.round(deltaX / colWidth);
+      const nextSpan = Math.max(1, Math.min(maxAllowedSpan, currentSpan + stepDelta));
+      if (nextSpan !== latestSpan) {
+        latestSpan = nextSpan;
+        setData((prev) => ({
+          ...prev,
+          tasks: prev.tasks.map((t) => (t.id === taskId ? { ...t, daySpan: nextSpan } : t)),
+        }));
+      }
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      setData((currentData) => {
+        handlePersistChanges(currentData);
+        return currentData;
+      });
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  // Drag-and-Drop Re-order Handlers
+  const handleDayDrop = (
+    e: React.DragEvent,
+    targetCategoryId: string,
+    targetDayId: string
+  ) => {
+    e.preventDefault();
+    setDragOverDayId(null);
+    setDragOverCategoryId(null);
+
+    const taskId = draggedTaskId || e.dataTransfer.getData('text/plain');
+    if (isReadOnly || !taskId) return;
+
+    const movingTask = data.tasks.find((t) => t.id === taskId);
+    if (!movingTask) return;
+
+    // Alt+Drag Quick Duplicate Check
+    const isAltDuplicate = e.altKey || (e.dataTransfer && e.dataTransfer.dropEffect === 'copy');
+    if (isAltDuplicate) {
+      handleDuplicateTask(movingTask, targetDayId, targetCategoryId);
+      return;
+    }
+
+    if (movingTask.dayId === targetDayId && movingTask.categoryId === targetCategoryId) {
+      return;
+    }
+
+    const targetTrackTasks = data.tasks.filter(
+      (t) => t.sprintId === activeSprint.id && t.categoryId === targetCategoryId
+    );
+
+    const collision = checkTaskCollision(
+      displayDays,
+      targetTrackTasks,
+      taskId,
+      targetDayId,
+      movingTask.daySpan || 1
+    );
+
+    if (!collision.hasCollision) {
+      // 0ms Fast Path (No collision, no popup)
+      const updatedTasks = data.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, dayId: targetDayId, categoryId: targetCategoryId, updatedAt: new Date().toISOString() }
+          : t
+      );
+      handlePersistChanges({ ...data, tasks: updatedTasks });
+      return;
+    }
+
+    // Collision detected -> Open Contextual Collision Modal
+    const targetDay = activeSprint.days.find((d) => d.id === targetDayId);
+    const targetDayLabel = targetDay ? `${targetDay.dayName} ${targetDay.dayNum}` : 'Target Day';
+    const primaryConflict = collision.conflictingTasks[0];
+    const conflictingTaskTitle =
+      (primaryConflict?.deliverableItems && primaryConflict.deliverableItems[0]?.text) ||
+      primaryConflict?.title ||
+      'Existing Card';
+
+    setCollisionModalState({
+      isOpen: true,
+      movingTaskId: taskId,
+      targetDayId,
+      targetCategoryId,
+      conflictingTaskTitle,
+      targetDayLabel,
+    });
+  };
+
+  const handleExecuteReorder = (mode: ReorderMode) => {
+    if (!collisionModalState) return;
+    const { movingTaskId, targetDayId, targetCategoryId } = collisionModalState;
+
+    const movingTask = data.tasks.find((t) => t.id === movingTaskId);
+    if (!movingTask) {
+      setCollisionModalState(null);
+      return;
+    }
+
+    const targetTrackTasks = data.tasks
+      .filter((t) => t.sprintId === activeSprint.id && t.categoryId === targetCategoryId && t.id !== movingTaskId)
+      .concat([{ ...movingTask, categoryId: targetCategoryId }]);
+
+    const reorderedTargetTasks = repositionTasksWithMode(
+      displayDays,
+      targetTrackTasks,
+      movingTaskId,
+      targetDayId,
+      mode
+    );
+
+    const otherTasks = data.tasks.filter(
+      (t) => !(t.sprintId === activeSprint.id && (t.categoryId === targetCategoryId || t.id === movingTaskId))
+    );
+
+    const finalTasks = [...otherTasks, ...reorderedTargetTasks];
+    handlePersistChanges({ ...data, tasks: finalTasks });
+    setCollisionModalState(null);
+  };
+
   // Tag Management Handlers
   const handleUpdateTag = (tagId: string, updates: Partial<Tag>) => {
     if (isReadOnly) return;
@@ -292,35 +843,91 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
     handlePersistChanges(updatedData);
   };
 
-  // Toggle Days in Multi-select Filter
+  // Toggle Days in Multi-select Filter with per-timeline persistence in DB & localStorage
   const handleToggleDay = (dayName: string) => {
+    let nextDays: string[];
     if (selectedDays.includes(dayName)) {
       if (selectedDays.length === 1) return; // Keep at least 1 day
-      setSelectedDays(selectedDays.filter((d) => d !== dayName));
+      nextDays = selectedDays.filter((d) => d !== dayName);
     } else {
-      setSelectedDays([...selectedDays, dayName]);
+      nextDays = [...selectedDays, dayName];
+    }
+    setSelectedDays(nextDays);
+    try {
+      localStorage.setItem(`weekline_days_${slug}`, JSON.stringify(nextDays));
+    } catch (_) {}
+    if (!isReadOnly) {
+      const updatedSettings = { ...(data.project.settings || {}), visibleDays: nextDays };
+      handlePersistChanges({
+        ...data,
+        project: { ...data.project, settings: updatedSettings },
+      });
     }
   };
 
-  const handleSetAllDays = () => setSelectedDays(ALL_DAYS_LIST);
-  const handleSetWorkdays = () => setSelectedDays(WORKDAYS_LIST);
+  const handleSetAllDays = () => {
+    setSelectedDays(ALL_DAYS_LIST);
+    try {
+      localStorage.setItem(`weekline_days_${slug}`, JSON.stringify(ALL_DAYS_LIST));
+    } catch (_) {}
+    if (!isReadOnly) {
+      const updatedSettings = { ...(data.project.settings || {}), visibleDays: ALL_DAYS_LIST };
+      handlePersistChanges({
+        ...data,
+        project: { ...data.project, settings: updatedSettings },
+      });
+    }
+  };
 
-  // Toggle Weeks in Multi-select Filter
+  const handleSetWorkdays = () => {
+    setSelectedDays(WORKDAYS_LIST);
+    try {
+      localStorage.setItem(`weekline_days_${slug}`, JSON.stringify(WORKDAYS_LIST));
+    } catch (_) {}
+    if (!isReadOnly) {
+      const updatedSettings = { ...(data.project.settings || {}), visibleDays: WORKDAYS_LIST };
+      handlePersistChanges({
+        ...data,
+        project: { ...data.project, settings: updatedSettings },
+      });
+    }
+  };
+
+  // Toggle Weeks in Multi-select Filter with per-timeline persistence in DB & localStorage
   const isAllWeeksSelected = selectedWeeks.length === allWeekNumbers.length;
   const handleToggleAllWeeks = () => {
-    if (isAllWeeksSelected) {
-      setSelectedWeeks([allWeekNumbers[0] || 1]);
-    } else {
-      setSelectedWeeks([...allWeekNumbers]);
+    const nextWeeks = isAllWeeksSelected ? [allWeekNumbers[0] || 1] : [...allWeekNumbers];
+    setSelectedWeeks(nextWeeks);
+    try {
+      localStorage.setItem(`weekline_weeks_${slug}`, JSON.stringify(nextWeeks));
+    } catch (_) {}
+    if (!isReadOnly) {
+      const updatedSettings = { ...(data.project.settings || {}), selectedWeeks: nextWeeks };
+      handlePersistChanges({
+        ...data,
+        project: { ...data.project, settings: updatedSettings },
+      });
     }
   };
 
   const handleToggleWeek = (weekNum: number) => {
+    let nextWeeks: number[];
     if (selectedWeeks.includes(weekNum)) {
       if (selectedWeeks.length === 1) return;
-      setSelectedWeeks(selectedWeeks.filter((w) => w !== weekNum));
+      nextWeeks = selectedWeeks.filter((w) => w !== weekNum);
     } else {
-      setSelectedWeeks([...selectedWeeks, weekNum].sort((a, b) => a - b));
+      nextWeeks = [...selectedWeeks, weekNum].sort((a, b) => a - b);
+    }
+    setSelectedWeeks(nextWeeks);
+    try {
+      localStorage.setItem(`weekline_weeks_${slug}`, JSON.stringify(nextWeeks));
+    } catch (_) {}
+    if (!isReadOnly) {
+      const updatedSettings = { ...(data.project.settings || {}), selectedWeeks: nextWeeks };
+      handlePersistChanges({
+        ...data,
+        project: { ...data.project, settings: updatedSettings },
+      });
     }
   };
 
@@ -645,183 +1252,25 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
   };
 
   const handleCopyShareLink = async () => {
-    if (typeof window === 'undefined') return;
+    if (typeof window !== 'undefined') return;
     const url = `${window.location.origin}/t/${slug}`;
     await navigator.clipboard.writeText(url);
     setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
   };
-
-  // Effective Assignees = Timeline Owner + Saved Assignees + Invited Collaborators
-  const effectiveAssignees: Assignee[] = useMemo(() => {
-    const list: Assignee[] = [];
-    const seenIds = new Set<string>();
-    const seenNames = new Set<string>();
-
-    // 1. Resolve Owner / Creator
-    const isCurrentViewerOwner = Boolean(
-      currentUser?.id && data.project.userId && currentUser.id === data.project.userId
-    );
-
-    // Find saved owner from data.assignees or data.project
-    const savedOwner = (data.assignees || []).find(
-      (a) => a.id === data.project.userId || a.id.startsWith('assignee-') || a.id === 'owner'
-    ) || (data.assignees && data.assignees.length > 0 ? data.assignees[0] : null);
-
-    const ownerId = data.project.userId || savedOwner?.id || currentUser?.id || 'owner';
-    const rawOwnerName =
-      (isCurrentViewerOwner ? currentUser?.name : null) ||
-      data.project.ownerName ||
-      (savedOwner && savedOwner.name !== 'Owner' && savedOwner.name !== 'Lead' ? savedOwner.name : null) ||
-      currentUser?.name ||
-      'Timeline Owner';
-
-    const displayName = isCurrentViewerOwner ? `${currentUser?.name || rawOwnerName} (You)` : rawOwnerName;
-    const initials = getInitials(displayName);
-
-    list.push({
-      id: ownerId,
-      projectId: data.project.id,
-      name: displayName,
-      initials,
-      color: savedOwner?.color || '#F59E0B',
-    });
-    seenIds.add(ownerId);
-    seenNames.add(rawOwnerName.toLowerCase());
-
-    // 2. Include any other saved assignees from data.assignees (excluding legacy placeholders)
-    (data.assignees || []).forEach((ass) => {
-      const normalizedName = (ass.name || '').trim().toLowerCase();
-      if (normalizedName === 'lead' || normalizedName === 'owner' || ass.id.startsWith('assignee-')) return;
-      if (seenIds.has(ass.id) || seenNames.has(normalizedName)) return;
-      seenIds.add(ass.id);
-      seenNames.add(normalizedName);
-      list.push({ ...ass, initials: getInitials(ass.name) });
-    });
-
-    // 3. Include Invited Collaborators
-    (collaborators || []).forEach((col) => {
-      const colName = col.name || col.email.split('@')[0];
-      if (seenIds.has(col.id) || seenNames.has(colName.toLowerCase())) return;
-      seenIds.add(col.id);
-      seenNames.add(colName.toLowerCase());
-
-      const isThisColCurrent = currentUser?.email && col.email.toLowerCase() === currentUser.email.toLowerCase();
-      const initials = getInitials(colName);
-      list.push({
-        id: col.id,
-        projectId: data.project.id,
-        name: isThisColCurrent ? `${colName} (You)` : colName,
-        initials,
-        color: '#2563EB',
-      });
-    });
-
-    return list;
-  }, [currentUser, data.project, data.assignees, collaborators]);
-
-  // Maps for efficient lookup
-  const assigneeMap = useMemo(() => {
-    const map = new Map<string, Assignee>();
-    effectiveAssignees.forEach((a) => map.set(a.id, a));
-
-    // Handle project owner alternate ID mapping if needed
-    if (currentUser?.id && data.project.userId && currentUser.id !== data.project.userId) {
-      const ownerAssignee = effectiveAssignees.find((a) => a.id === currentUser.id || a.id === data.project.userId);
-      if (ownerAssignee) {
-        map.set(data.project.userId, ownerAssignee);
-        map.set(currentUser.id, ownerAssignee);
-      }
-    }
-    return map;
-  }, [effectiveAssignees, currentUser?.id, data.project.userId]);
-
-  const tagMap = useMemo(() => {
-    const map = new Map<string, Tag>();
-    (data.tags || []).forEach((t) => map.set(t.id, t));
-    return map;
-  }, [data.tags]);
-
-  // Filtered displayed days based on selected weeks AND selected days in strict calendar order
-  const displayDays = useMemo(() => {
-    return activeSprint.days
-      .filter((d) => selectedWeeks.includes(d.weekNumber) && selectedDays.includes(d.dayName))
-      .sort((a, b) => {
-        if (a.weekNumber !== b.weekNumber) return a.weekNumber - b.weekNumber;
-        return (CALENDAR_DAY_ORDER[a.dayName.toLowerCase()] ?? 0) - (CALENDAR_DAY_ORDER[b.dayName.toLowerCase()] ?? 0);
-      });
-  }, [activeSprint.days, selectedWeeks, selectedDays]);
-
-  // Production-grade dynamic calculation of the Month(s) currently displayed
-  const displayedMonthLabel = useMemo(() => {
-    return computeMonthLabelFromDays(displayDays);
-  }, [displayDays]);
-
-  // Filtered displayed week groups based on selected weeks and selected days
-  const displayWeekGroups = useMemo(() => {
-    return allWeekGroups
-      .filter((w) => selectedWeeks.includes(w.weekNumber))
-      .map((w) => {
-        // Get all matching days in this week that are currently selected
-        const matchingDays = activeSprint.days.filter(
-          (d) => d.weekNumber === w.weekNumber && selectedDays.includes(d.dayName)
-        );
-
-        if (matchingDays.length === 0) {
-          return { ...w, daySpan: 0, dateRange: '' };
-        }
-
-        const firstDay = matchingDays[0];
-        const lastDay = matchingDays[matchingDays.length - 1];
-
-        let dynamicDateRange = '';
-        if (matchingDays.length === 1) {
-          dynamicDateRange = `${firstDay.dayName} ${firstDay.dayNum}`;
-        } else {
-          dynamicDateRange = `${firstDay.dayName} ${firstDay.dayNum} – ${lastDay.dayName} ${lastDay.dayNum}`;
-        }
-
-        return {
-          ...w,
-          daySpan: matchingDays.length,
-          dateRange: dynamicDateRange,
-        };
-      })
-      .filter((w) => w.daySpan > 0);
-  }, [allWeekGroups, selectedWeeks, selectedDays, activeSprint.days]);
-
-  // Filter tasks on the canvas based on Assignee filter and Tag filter
-  const filteredTasks = useMemo(() => {
-    return data.tasks.filter((t) => {
-      if (selectedAssigneeFilter !== 'all') {
-        const taskAssigneeIds = t.assigneeIds && t.assigneeIds.length > 0
-          ? t.assigneeIds
-          : (t.assigneeId ? [t.assigneeId] : []);
-        if (!taskAssigneeIds.includes(selectedAssigneeFilter)) {
-          return false;
-        }
-      }
-      if (selectedTagFilter !== 'all' && t.tagId !== selectedTagFilter) {
-        return false;
-      }
-      return true;
-    });
-  }, [data.tasks, selectedAssigneeFilter, selectedTagFilter]);
-
-  const columnTemplate = `240px repeat(${displayDays.length}, 190px)`;
 
   return (
     <div className="relative h-screen w-full bg-[#F8F9FA] text-gray-900 font-sans antialiased overflow-hidden select-none flex flex-col">
       {/* TOP BRAND & STUDIO APP BAR */}
       <header className="h-14 bg-white border-b border-gray-200 z-40 px-4 flex items-center justify-between shrink-0 shadow-2xs">
         <div className="flex items-center gap-3">
-          <Link
-            href="/dashboard"
+          <button
+            type="button"
+            onClick={() => handleNavigateWithGuard('/dashboard')}
             title="Back to Dashboard"
             className="p-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 hover:text-gray-900 transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
-          </Link>
+          </button>
 
           <div className="flex items-center gap-2 text-xs font-bold">
             <span className="text-gray-400">Weekline</span>
@@ -830,10 +1279,18 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
           </div>
 
           {/* Auto-Save & Status Pill */}
-          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-[10px] font-bold">
-            <span className={`w-1.5 h-1.5 rounded-full ${isSaved ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
-            <span className="text-emerald-800">Auto-Save</span>
-            <span className="text-emerald-600 font-bold">{isSaved ? 'Saved' : 'Saving...'}</span>
+          <div className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-bold transition-all ${
+            isSaved
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-amber-50 border-amber-300 text-amber-800 animate-pulse'
+          }`}>
+            {isSaved ? (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            ) : (
+              <Loader2 className="w-3 h-3 text-amber-600 animate-spin" />
+            )}
+            <span>Auto-Save</span>
+            <span className="font-extrabold">{isSaved ? 'Saved' : 'Saving changes...'}</span>
           </div>
 
           {/* Permission Mode Indicator */}
@@ -848,13 +1305,14 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
         {/* Collaborators and Share Action */}
         <div className="flex items-center gap-3">
           {!currentUser ? (
-            <Link
-              href="/auth"
+            <button
+              type="button"
+              onClick={() => handleNavigateWithGuard('/auth')}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[#F59E0B] hover:bg-[#D97706] text-gray-950 font-black text-xs rounded-xl transition-all shadow-sm shadow-[#F59E0B]/20 cursor-pointer"
             >
               <LogIn className="w-3.5 h-3.5" />
               <span>Sign In to Edit</span>
-            </Link>
+            </button>
           ) : (
             <>
               {/* Active Collaborators Preview Avatars */}
@@ -1084,6 +1542,30 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
               </>
             )}
           </div>
+
+          {/* Undo & Redo Controls */}
+          {!isReadOnly && (
+            <div className="flex items-center bg-gray-50 border border-gray-200 rounded-xl p-0.5 gap-0.5">
+              <button
+                type="button"
+                disabled={!historyControls.canUndo}
+                onClick={handleUndo}
+                title="Undo (Ctrl+Z)"
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-700 hover:bg-white hover:text-gray-900 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed cursor-pointer transition-all shadow-2xs disabled:shadow-none"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                disabled={!historyControls.canRedo}
+                onClick={handleRedo}
+                title="Redo (Ctrl+Y)"
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-700 hover:bg-white hover:text-gray-900 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed cursor-pointer transition-all shadow-2xs disabled:shadow-none"
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Center: Dynamic Month Header */}
@@ -1364,17 +1846,24 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
           <div className="flex flex-col divide-y divide-gray-200">
             {data.categories.map((cat) => {
               const isEditing = editingTrackId === cat.id;
+              const trackTasks = filteredTasks.filter(
+                (t) => t.sprintId === activeSprint.id && t.categoryId === cat.id
+              );
 
               return (
                 <div
                   key={cat.id}
-                  className="grid bg-white hover:bg-gray-50/30 transition-colors"
+                  className="grid bg-white hover:bg-gray-50/30 transition-colors relative min-h-[135px]"
                   style={{
                     gridTemplateColumns: columnTemplate,
+                    gridTemplateRows: 'auto',
                   }}
                 >
                   {/* Left Work Stream Column */}
-                  <div className="sticky left-0 z-10 bg-white border-r border-gray-200 p-3.5 flex items-center justify-between group/track shadow-2xs">
+                  <div
+                    className="sticky left-0 z-10 bg-white border-r border-gray-200 p-3.5 flex items-center justify-between group/track shadow-2xs"
+                    style={{ gridColumn: 1, gridRow: 1 }}
+                  >
                     {isEditing ? (
                       <form onSubmit={handleRenameTrack} className="flex items-center gap-1.5 w-full">
                         <input
@@ -1431,131 +1920,46 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                     )}
                   </div>
 
-                  {/* Day Grid Cells */}
-                  {displayDays.map((day) => {
-                    const cellTasks = filteredTasks.filter(
-                      (t) =>
-                        t.sprintId === activeSprint.id &&
-                        t.categoryId === cat.id &&
-                        t.dayId === day.id
-                    );
+                  {/* Day Background Grid Cells */}
+                  {displayDays.map((day, dIdx) => {
+                    const isDragTarget = dragOverDayId === day.id && dragOverCategoryId === cat.id;
+                    const hasCardStartingHere = trackTasks.some((t) => t.dayId === day.id);
 
                     return (
                       <div
                         key={day.id}
+                        onDragOver={(e) => {
+                          if (isReadOnly) return;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (dragOverDayId !== day.id || dragOverCategoryId !== cat.id) {
+                            setDragOverDayId(day.id);
+                            setDragOverCategoryId(cat.id);
+                          }
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverDayId === day.id && dragOverCategoryId === cat.id) {
+                            setDragOverDayId(null);
+                            setDragOverCategoryId(null);
+                          }
+                        }}
+                        onDrop={(e) => handleDayDrop(e, cat.id, day.id)}
                         onClick={() => {
-                          if (!isReadOnly && cellTasks.length === 0) {
+                          if (!isReadOnly && !hasCardStartingHere) {
                             handleOpenNewTaskModal(cat.id, day.id);
                           }
                         }}
-                        className={`p-2 flex flex-col justify-center min-h-[135px] relative group/cell ${
+                        className={`p-2 flex flex-col justify-center min-h-[135px] relative group/cell transition-colors ${
                           day.isWeekStart ? 'border-l-2 border-gray-200 bg-gray-50/30' : 'border-l border-gray-200/60'
                         } ${day.isWeekend ? 'bg-amber-50/10' : ''} ${
-                          !isReadOnly && cellTasks.length === 0 ? 'cursor-pointer' : ''
+                          isDragTarget ? 'bg-amber-100/60 ring-2 ring-inset ring-[#F59E0B]' : ''
+                        } ${
+                          !isReadOnly && !hasCardStartingHere ? 'cursor-pointer' : ''
                         }`}
+                        style={{ gridColumn: dIdx + 2, gridRow: 1, zIndex: 1 }}
                       >
-                        {cellTasks.map((t) => {
-                          const rawAssigneeIds = t.assigneeIds && t.assigneeIds.length > 0
-                            ? t.assigneeIds
-                            : (t.assigneeId ? [t.assigneeId] : []);
-
-                          const seenCardAssigneeIds = new Set<string>();
-                          const taskAssignees: Assignee[] = [];
-                          rawAssigneeIds.forEach((id) => {
-                            const a = assigneeMap.get(id);
-                            if (a && !seenCardAssigneeIds.has(a.id)) {
-                              seenCardAssigneeIds.add(a.id);
-                              taskAssignees.push(a);
-                            }
-                          });
-                          const tag = t.tagId ? tagMap.get(t.tagId) : undefined;
-                          const cardBg = tag?.color || '#0F172A';
-
-                          return (
-                            <div
-                              key={t.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedTask(t);
-                              }}
-                              className="w-full min-h-[110px] rounded-2xl p-3 flex flex-col justify-between border border-black/10 hover:border-black/30 transition-all cursor-pointer shadow-sm hover:shadow-md hover:scale-[1.01] text-white gap-2"
-                              style={{
-                                backgroundColor: cardBg,
-                                backgroundImage: `linear-gradient(135deg, ${cardBg} 0%, rgba(0,0,0,0.18) 100%)`,
-                              }}
-                            >
-                              {/* Top Bar: Tag Badge + Multi-Assignees Initials Stack */}
-                              <div className="flex items-center justify-between gap-1 shrink-0">
-                                <span className="text-[9.5px] font-black uppercase tracking-wider bg-black/25 text-white/95 px-2 py-0.5 rounded-md truncate max-w-[95px]">
-                                  {tag?.name || 'TAG'}
-                                </span>
-
-                                <div className="flex items-center -space-x-1.5 shrink-0 bg-black/20 backdrop-blur-xs p-0.5 rounded-full">
-                                  {taskAssignees.map((a) => {
-                                    const isLightColor =
-                                      !a.color ||
-                                      a.color === '#F59E0B' ||
-                                      a.color === '#FBBF24' ||
-                                      a.color === '#FDE047' ||
-                                      a.color === '#FEF08A';
-
-                                    return (
-                                      <span
-                                        key={a.id}
-                                        title={a.name}
-                                        className={`w-5 h-5 rounded-full text-[9px] font-black flex items-center justify-center border-2 border-white shadow-md ring-1 ring-black/20 shrink-0 uppercase tracking-tight ${
-                                          isLightColor ? 'text-gray-950' : 'text-white'
-                                        }`}
-                                        style={{ backgroundColor: a.color || '#F59E0B' }}
-                                      >
-                                        {a.initials}
-                                      </span>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-
-                              {/* Visible Checklist Items (No Title) */}
-                              <div className="flex-1 flex flex-col gap-1.5 overflow-hidden">
-                                {(t.deliverableItems || []).map((item, idx) => (
-                                  <div
-                                    key={item.id || idx}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleToggleDeliverable(t.id, idx);
-                                    }}
-                                    className="flex items-start gap-2 text-xs text-white/95 leading-tight cursor-pointer group/item"
-                                  >
-                                    <div
-                                      className={`w-3.5 h-3.5 rounded border mt-0.5 shrink-0 flex items-center justify-center transition-colors ${
-                                        item.isCompleted
-                                          ? 'bg-white text-gray-950 border-white font-black'
-                                          : 'border-white/50 bg-black/20 group-hover/item:border-white'
-                                      }`}
-                                    >
-                                      {item.isCompleted && <Check className="w-2.5 h-2.5 stroke-[3]" />}
-                                    </div>
-                                    <span
-                                      className={`break-words line-clamp-2 text-[11px] font-bold ${
-                                        item.isCompleted ? 'line-through opacity-60 text-white/70' : 'text-white'
-                                      }`}
-                                    >
-                                      {item.text}
-                                    </span>
-                                  </div>
-                                ))}
-                                {(!t.deliverableItems || t.deliverableItems.length === 0) && (
-                                  <span className="text-[11px] text-white/60 font-medium italic">
-                                    Click to add checklist items
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-
                         {/* Quick Add Button on Hover */}
-                        {!isReadOnly && cellTasks.length === 0 && (
+                        {!isReadOnly && !hasCardStartingHere && !isDragTarget && (
                           <button
                             type="button"
                             onClick={(e) => {
@@ -1567,6 +1971,178 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                             <Plus className="w-4 h-4" />
                           </button>
                         )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Multi-Day Task Cards on Grid */}
+                  {trackTasks.map((t) => {
+                    const proj = calculateVisibleProjection(activeSprint.days, displayDays, t);
+                    if (!proj.isVisible) return null;
+
+                    const rawAssigneeIds = t.assigneeIds && t.assigneeIds.length > 0
+                      ? t.assigneeIds
+                      : (t.assigneeId ? [t.assigneeId] : []);
+
+                    const seenCardAssigneeIds = new Set<string>();
+                    const taskAssignees: Assignee[] = [];
+                    rawAssigneeIds.forEach((id) => {
+                      const a = assigneeMap.get(id);
+                      if (a && !seenCardAssigneeIds.has(a.id)) {
+                        seenCardAssigneeIds.add(a.id);
+                        taskAssignees.push(a);
+                      }
+                    });
+                    const tag = t.tagId ? tagMap.get(t.tagId) : undefined;
+                    const cardBg = tag?.color || '#0F172A';
+
+                    return (
+                      <div
+                        key={t.id}
+                        draggable={!isReadOnly}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', t.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                          setDraggedTaskId(t.id);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedTaskId(null);
+                          setDragOverDayId(null);
+                          setDragOverCategoryId(null);
+                        }}
+                        onDragOver={(e) => {
+                          if (isReadOnly) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (dragOverDayId !== t.dayId || dragOverCategoryId !== cat.id) {
+                            setDragOverDayId(t.dayId);
+                            setDragOverCategoryId(cat.id);
+                          }
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleDayDrop(e, cat.id, t.dayId);
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedTask(t);
+                        }}
+                        onContextMenu={(e) => {
+                          if (isReadOnly) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setContextMenuState({
+                            isOpen: true,
+                            x: e.clientX,
+                            y: e.clientY,
+                            task: t,
+                          });
+                        }}
+                        className={`p-2 relative flex flex-col justify-center select-none group/card pointer-events-auto transition-opacity ${
+                          draggedTaskId === t.id ? 'opacity-40' : 'opacity-100'
+                        }`}
+                        style={{
+                          gridColumn: `${proj.startVisibleIndex + 2} / span ${proj.visibleSpan}`,
+                          gridRow: 1,
+                          zIndex: 2,
+                        }}
+                      >
+                        <div
+                          className="w-full min-h-[110px] rounded-2xl p-3 flex flex-col justify-between border border-black/10 hover:border-black/30 transition-all cursor-grab active:cursor-grabbing shadow-sm hover:shadow-md hover:scale-[1.005] text-white gap-2 relative"
+                          style={{
+                            backgroundColor: cardBg,
+                            backgroundImage: `linear-gradient(135deg, ${cardBg} 0%, rgba(0,0,0,0.18) 100%)`,
+                          }}
+                        >
+                          {/* Top Bar: Tag Badge + Day Span Badge + Multi-Assignees Initials Stack */}
+                          <div className="flex items-center justify-between gap-1 shrink-0">
+                            <div className="flex items-center gap-1.5 truncate">
+                              <span className="text-[9.5px] font-black uppercase tracking-wider bg-black/25 text-white/95 px-2 py-0.5 rounded-md truncate max-w-[95px]">
+                                {tag?.name || 'TAG'}
+                              </span>
+                              {proj.visibleSpan > 1 && (
+                                <span className="text-[9px] font-black uppercase tracking-wider bg-white/20 text-white px-1.5 py-0.5 rounded-md">
+                                  {proj.visibleSpan}d
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center -space-x-1.5 shrink-0 bg-black/20 backdrop-blur-xs p-0.5 rounded-full">
+                              {taskAssignees.map((a) => {
+                                const isLightColor =
+                                  !a.color ||
+                                  a.color === '#F59E0B' ||
+                                  a.color === '#FBBF24' ||
+                                  a.color === '#FDE047' ||
+                                  a.color === '#FEF08A';
+
+                                return (
+                                  <span
+                                    key={a.id}
+                                    title={a.name}
+                                    className={`w-5 h-5 rounded-full text-[9px] font-black flex items-center justify-center border-2 border-white shadow-md ring-1 ring-black/20 shrink-0 uppercase tracking-tight ${
+                                      isLightColor ? 'text-gray-950' : 'text-white'
+                                    }`}
+                                    style={{ backgroundColor: a.color || '#F59E0B' }}
+                                  >
+                                    {a.initials}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Visible Checklist Items */}
+                          <div className="flex-1 flex flex-col gap-1.5 overflow-hidden">
+                            {(t.deliverableItems || []).map((item, idx) => (
+                              <div
+                                key={item.id || idx}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleDeliverable(t.id, idx);
+                                }}
+                                className="flex items-start gap-2 text-xs text-white/95 leading-tight cursor-pointer group/item"
+                              >
+                                <div
+                                  className={`w-3.5 h-3.5 rounded border mt-0.5 shrink-0 flex items-center justify-center transition-colors ${
+                                    item.isCompleted
+                                      ? 'bg-white text-gray-950 border-white font-black'
+                                      : 'border-white/50 bg-black/20 group-hover/item:border-white'
+                                  }`}
+                                >
+                                  {item.isCompleted && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                                </div>
+                                <span
+                                  className={`break-words line-clamp-2 text-[11px] font-bold ${
+                                    item.isCompleted ? 'line-through opacity-60 text-white/70' : 'text-white'
+                                  }`}
+                                >
+                                  {item.text}
+                                </span>
+                              </div>
+                            ))}
+                            {(!t.deliverableItems || t.deliverableItems.length === 0) && (
+                              <span className="text-[11px] text-white/60 font-medium italic">
+                                Click to add checklist items
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Right Edge Mouse Drag Handle for Duration Resizing */}
+                          {!isReadOnly && (
+                            <div
+                              onMouseDown={(e) =>
+                                handleStartResize(e, t.id, t.daySpan || 1, t.dayId)
+                              }
+                              className="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-opacity z-20 hover:bg-black/25 rounded-r-2xl"
+                              title="Drag to adjust day duration"
+                            >
+                              <div className="w-1 h-5 bg-white/70 rounded-full pointer-events-none" />
+                            </div>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -1836,7 +2412,61 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
               </div>
             </div>
 
+            {/* Duration (Days) Stepper */}
+            {(() => {
+              const modalProj = calculateVisibleProjection(activeSprint.days, displayDays, selectedTask);
+              const displaySpan = modalProj.isVisible ? modalProj.visibleSpan : (selectedTask.daySpan || 1);
+              const isFiltered = displayDays.length < activeSprint.days.length;
 
+              return (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[10px] font-black uppercase text-gray-700">
+                      Duration ({displaySpan} {displaySpan === 1 ? 'Day' : 'Days'})
+                    </label>
+                    {isFiltered && (selectedTask.daySpan || 1) !== displaySpan && (
+                      <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/50">
+                        {selectedTask.daySpan || 1} calendar days total
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center bg-gray-50 border border-gray-200 rounded-xl p-1 gap-1">
+                      <button
+                        type="button"
+                        disabled={isReadOnly || (selectedTask.daySpan || 1) <= 1}
+                        onClick={() => {
+                          const newSpan = Math.max(1, (selectedTask.daySpan || 1) - 1);
+                          handleUpdateTaskField(selectedTask.id, 'daySpan', newSpan);
+                        }}
+                        className="w-7 h-7 rounded-lg bg-white border border-gray-200 hover:bg-gray-100 flex items-center justify-center text-xs font-black text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-2xs"
+                      >
+                        -
+                      </button>
+                      <span className="px-3 text-xs font-black text-gray-900 min-w-[55px] text-center">
+                        {displaySpan} {displaySpan === 1 ? 'Day' : 'Days'}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={isReadOnly}
+                        onClick={() => {
+                          const newSpan = (selectedTask.daySpan || 1) + 1;
+                          handleUpdateTaskField(selectedTask.id, 'daySpan', newSpan);
+                        }}
+                        className="w-7 h-7 rounded-lg bg-white border border-gray-200 hover:bg-gray-100 flex items-center justify-center text-xs font-black text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-2xs"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <span className="text-[11px] font-semibold text-gray-400">
+                      {isFiltered
+                        ? `Covers ${displaySpan} visible working ${displaySpan === 1 ? 'day' : 'days'}`
+                        : `Spans across ${displaySpan} consecutive sprint days`}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Deliverables Checklist */}
             <div>
@@ -2522,6 +3152,232 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                 className="px-5 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-gray-950 font-black text-xs rounded-xl cursor-pointer"
               >
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONTEXTUAL RE-ORDER COLLISION MODAL */}
+      {collisionModalState && collisionModalState.isOpen && (
+        <div
+          onClick={() => setCollisionModalState(null)}
+          className="fixed inset-0 bg-black/50 backdrop-blur-2xs z-50 flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white border border-gray-200 rounded-3xl w-full max-w-md p-6 relative shadow-2xl flex flex-col gap-5 animate-dropdown"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-50 text-[#D97706] flex items-center justify-center font-black">
+                  <ArrowLeftRight className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-gray-900">Re-order Cards</h3>
+                  <p className="text-[11px] text-gray-400 font-semibold">
+                    Slot on <span className="font-bold text-gray-700">{collisionModalState.targetDayLabel}</span> is already occupied.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCollisionModalState(null)}
+                className="text-gray-400 hover:text-gray-700 p-1 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Conflict Summary Box */}
+            <div className="p-3 bg-amber-50/60 border border-amber-200/80 rounded-2xl flex flex-col gap-1">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#D97706]">Conflicting Card</span>
+              <span className="text-xs font-bold text-gray-900 truncate">
+                {collisionModalState.conflictingTaskTitle}
+              </span>
+            </div>
+
+            {/* Action Options */}
+            <div className="flex flex-col gap-2.5">
+              <button
+                type="button"
+                onClick={() => handleExecuteReorder('push_right')}
+                className="w-full p-3.5 rounded-2xl border border-gray-200 hover:border-[#F59E0B] hover:bg-amber-50/40 flex items-center justify-between text-left transition-all cursor-pointer group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-xl bg-gray-100 group-hover:bg-[#F59E0B] group-hover:text-gray-950 flex items-center justify-center text-gray-600 transition-colors">
+                    &rarr;
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-gray-900">Push Right (Forward)</div>
+                    <div className="text-[11px] text-gray-400 font-medium">Shift downstream cards to succeeding days</div>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleExecuteReorder('push_left')}
+                className="w-full p-3.5 rounded-2xl border border-gray-200 hover:border-[#F59E0B] hover:bg-amber-50/40 flex items-center justify-between text-left transition-all cursor-pointer group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-xl bg-gray-100 group-hover:bg-[#F59E0B] group-hover:text-gray-950 flex items-center justify-center text-gray-600 transition-colors">
+                    &larr;
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-gray-900">Push Left (Backward)</div>
+                    <div className="text-[11px] text-gray-400 font-medium">Shift upstream cards to preceding days</div>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleExecuteReorder('swap')}
+                className="w-full p-3.5 rounded-2xl border border-gray-200 hover:border-[#F59E0B] hover:bg-amber-50/40 flex items-center justify-between text-left transition-all cursor-pointer group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-xl bg-gray-100 group-hover:bg-[#F59E0B] group-hover:text-gray-950 flex items-center justify-center text-gray-600 transition-colors">
+                    &#8644;
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-gray-900">Swap Positions</div>
+                    <div className="text-[11px] text-gray-400 font-medium">Exchange positions between the two cards</div>
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            {/* Cancel Footer */}
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setCollisionModalState(null)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM RIGHT-CLICK CARD CONTEXT MENU */}
+      {contextMenuState && contextMenuState.isOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-50 cursor-default"
+            onClick={() => setContextMenuState(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenuState(null);
+            }}
+          />
+          <div
+            className="fixed z-50 bg-white border border-gray-200/90 rounded-2xl shadow-2xl p-1.5 min-w-[200px] flex flex-col gap-0.5 animate-dropdown text-xs backdrop-blur-md"
+            style={{
+              top: Math.min(contextMenuState.y, typeof window !== 'undefined' ? window.innerHeight - 220 : contextMenuState.y),
+              left: Math.min(contextMenuState.x, typeof window !== 'undefined' ? window.innerWidth - 220 : contextMenuState.x),
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400 border-b border-gray-100 mb-0.5 truncate">
+              {contextMenuState.task.deliverableItems?.[0]?.text || contextMenuState.task.title || 'Task Options'}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                handleDuplicateTask(contextMenuState.task);
+              }}
+              className="flex items-center justify-between px-2.5 py-2 rounded-xl font-bold text-gray-700 hover:bg-amber-50 hover:text-amber-700 transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <Copy className="w-3.5 h-3.5 text-amber-600" />
+                <span>Duplicate Card</span>
+              </div>
+              <span className="text-[10px] text-gray-400 font-mono">Alt+Drag</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedTask(contextMenuState.task);
+                setContextMenuState(null);
+              }}
+              className="flex items-center gap-2 px-2.5 py-2 rounded-xl font-bold text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+            >
+              <Edit2 className="w-3.5 h-3.5 text-gray-500" />
+              <span>Edit Details...</span>
+            </button>
+
+            <div className="my-0.5 border-t border-gray-100" />
+
+            <button
+              type="button"
+              onClick={() => {
+                handleDeleteTask(contextMenuState.task.id);
+                setContextMenuState(null);
+              }}
+              className="flex items-center gap-2 px-2.5 py-2 rounded-xl font-bold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+              <span>Delete Card</span>
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* UNSAVED CHANGES / ACTIVE SAVING GUARD MODAL */}
+      {showUnsavedWarningModal && (
+        <div
+          onClick={() => setShowUnsavedWarningModal(false)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-2xs z-50 flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white border border-gray-200 rounded-3xl w-full max-w-md p-6 relative shadow-2xl flex flex-col gap-5 animate-dropdown"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-50 border border-amber-200 text-[#D97706] flex items-center justify-center font-black shrink-0 shadow-xs">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-gray-900">Changes Still Saving...</h3>
+                <p className="text-xs text-gray-500 font-medium mt-0.5">
+                  Your timeline changes are currently being synced with the database.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-2xl flex items-center gap-2.5 text-xs font-semibold text-amber-900">
+              <Loader2 className="w-4 h-4 text-amber-600 animate-spin shrink-0" />
+              <span>Leaving or reloading right now might result in recent edits not being saved.</span>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowUnsavedWarningModal(false);
+                  setPendingNavigationUrl(null);
+                }}
+                className="px-4 py-2.5 bg-[#F59E0B] hover:bg-[#D97706] text-gray-950 font-black text-xs rounded-xl transition-all shadow-sm shadow-[#F59E0B]/20 cursor-pointer"
+              >
+                Stay & Wait
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowUnsavedWarningModal(false);
+                  if (pendingNavigationUrl) {
+                    router.push(pendingNavigationUrl);
+                  }
+                }}
+                className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+              >
+                Leave Anyway
               </button>
             </div>
           </div>

@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resetDbToDefault } from '@/lib/db';
+import { defaultTimelineData } from '@/lib/default-data';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function POST(request: NextRequest) {
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ slug: string }> }
+) {
   try {
-    const data = resetDbToDefault();
-    return NextResponse.json({ success: true, data });
-  } catch (error) {
-    console.error('API POST /api/timeline/[slug]/reset error:', error);
-    return NextResponse.json({ error: 'Failed to reset database' }, { status: 500 });
+    const { slug } = await params;
+    return NextResponse.json({
+      success: true,
+      message: `Reset requested for ${slug}`,
+      data: defaultTimelineData,
+    });
+  } catch (error: any) {
+    return NextResponse.json({ error: 'Failed to reset' }, { status: 500 });
   }
 }

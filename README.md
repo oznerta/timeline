@@ -10,7 +10,7 @@
 2. **Multi-Week Delivery Schedules**: Dynamic month calculation, 4-week structured view, and customizable week filtering.
 3. **Multi-Select Combobox Drawer**: Dynamically toggle and display any combination of weeks (`Week 1`, `Week 2`, `Week 3`, `Week 4`, or `All Weeks`).
 4. **Organization-Based Workspaces**: Multi-tenant workspace management, zero dummy data, and real user persistence.
-5. **Authentication & Route Guard**: Complete Sign In / Sign Up portal with strict dashboard route protection and session restoration (SQLite + Supabase).
+5. **Authentication & Route Guard**: Complete Sign In / Sign Up portal with strict dashboard route protection and session restoration (Supabase Auth).
 6. **Master Timeline Board**:
    - Fixed viewport-width month schedule header (does not scroll horizontally).
    - Sticky top week groups and days header.
