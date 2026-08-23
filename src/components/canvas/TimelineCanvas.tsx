@@ -1239,7 +1239,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
 
     setIsInviting(true);
     try {
-      const inviterName = currentUser?.name || currentUser?.email?.split('@')[0] || 'A team member';
+      const inviterName = currentUser?.name || data.project.ownerName || currentUser?.email?.split('@')[0] || 'A team member';
       const res = await fetch(`/api/timeline/${slug}/collaborators`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2892,24 +2892,32 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
 
               <div className="flex flex-col divide-y divide-gray-100 max-h-56 overflow-y-auto pr-1">
                 {/* Owner */}
-                <div className="flex items-center justify-between py-2.5">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-900 font-black text-xs flex items-center justify-center border border-amber-200">
-                      {getInitials(effectiveAssignees[0]?.name || 'Owner')}
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-xs font-bold text-gray-900">
-                        {effectiveAssignees[0]?.name || 'Owner'}
+                {(() => {
+                  const rawOwner = (effectiveAssignees[0]?.name || data.project.ownerName || 'Owner')
+                    .replace(/\(Owner\)/gi, '')
+                    .replace(/\(You\)/gi, '')
+                    .trim();
+                  return (
+                    <div className="flex items-center justify-between py-2.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-900 font-black text-xs flex items-center justify-center border border-amber-200">
+                          {getInitials(rawOwner)}
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold text-gray-900">
+                            {rawOwner} {isOwner ? '(You)' : ''}
+                          </span>
+                          <span className="text-[11px] text-gray-400">
+                            {data.project.ownerEmail || (isOwner ? currentUser?.email : '')}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                        Owner
                       </span>
-                      <span className="text-[11px] text-gray-400">
-                        {data.project.ownerEmail || (isOwner ? currentUser?.email : '')}
-                      </span>
                     </div>
-                  </div>
-                  <span className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
-                    Owner
-                  </span>
-                </div>
+                  );
+                })()}
 
                 {/* Invited Collaborators */}
                 {collaborators.map((col) => (

@@ -7,28 +7,37 @@ export const runtime = 'nodejs';
 export async function GET(request: NextRequest) {
   try {
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('*')
-        .order('updated_at', { ascending: false });
+      const [projectsRes, usersRes] = await Promise.all([
+        supabase.from('projects').select('*').order('updated_at', { ascending: false }),
+        supabase.from('users').select('id, name, email'),
+      ]);
 
-      if (!error && data) {
+      const data = projectsRes.data;
+      const userMap = new Map<string, { name: string; email: string }>();
+      (usersRes.data || []).forEach((u: any) => userMap.set(u.id, { name: u.name, email: u.email }));
+
+      if (data) {
         return NextResponse.json({
-          projects: data.map((p: any) => ({
-            id: p.id,
-            userId: p.user_id,
-            folderId: p.folder_id,
-            slug: p.slug,
-            title: p.title,
-            subtitle: p.subtitle,
-            clientName: p.client_name,
-            brandName: p.brand_name,
-            accessLevel: p.access_level || 'public_view',
-            isFavorite: p.is_favorite || false,
-            status: p.status || 'active',
-            createdAt: p.created_at,
-            updatedAt: p.updated_at,
-          })),
+          projects: data.map((p: any) => {
+            const ownerInfo = p.user_id ? userMap.get(p.user_id) : undefined;
+            return {
+              id: p.id,
+              userId: p.user_id,
+              ownerName: ownerInfo?.name || p.owner_name,
+              ownerEmail: ownerInfo?.email || p.owner_email,
+              folderId: p.folder_id,
+              slug: p.slug,
+              title: p.title,
+              subtitle: p.subtitle,
+              clientName: p.client_name,
+              brandName: p.brand_name,
+              accessLevel: p.access_level || 'public_view',
+              isFavorite: p.is_favorite || false,
+              status: p.status || 'active',
+              createdAt: p.created_at,
+              updatedAt: p.updated_at,
+            };
+          }),
         });
       }
     }

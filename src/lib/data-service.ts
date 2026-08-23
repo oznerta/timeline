@@ -10,7 +10,7 @@ import {
   TaskCard,
   TimelineData,
 } from '@/types/timeline';
-import { defaultTimelineData } from './default-data';
+import { defaultTimelineData, getInitials } from './default-data';
 import { isSupabaseConfigured, supabase } from './supabase';
 
 const LOCAL_STORAGE_KEY_PREFIX = 'weekline_timeline_';
@@ -241,6 +241,18 @@ export async function persistTimelineData(data: TimelineData): Promise<void> {
         updated_at: new Date().toISOString(),
       });
 
+      // Synchronize User profile in public users table if userId is present
+      if (data.project.userId && data.project.ownerName) {
+        try {
+          await supabase.from('users').upsert({
+            id: data.project.userId,
+            name: data.project.ownerName,
+            email: data.project.ownerEmail || '',
+            role: 'editor',
+          });
+        } catch (_) {}
+      }
+
       // Synchronize Sprints
       for (const sprint of data.sprints) {
         await supabase.from('sprints').upsert({
@@ -275,11 +287,29 @@ export async function persistTimelineData(data: TimelineData): Promise<void> {
       // Synchronize Assignees
       if (data.assignees) {
         for (const assignee of data.assignees) {
+          const isOwnerAssignee =
+            assignee.id === data.project.userId ||
+            assignee.id === 'owner' ||
+            assignee.id.startsWith('assignee-');
+
+          let assigneeName = assignee.name;
+          if (isOwnerAssignee && data.project.ownerName) {
+            assigneeName = data.project.ownerName;
+          }
+
+          // Strip any role indicators before saving to DB
+          const cleanName = assigneeName
+            .replace(/\(Owner\)/gi, '')
+            .replace(/\(You\)/gi, '')
+            .replace(/\(Editor\)/gi, '')
+            .replace(/\(Viewer\)/gi, '')
+            .trim();
+
           await supabase.from('assignees').upsert({
             id: assignee.id,
             project_id: data.project.id,
-            name: assignee.name,
-            initials: assignee.initials,
+            name: cleanName || assigneeName,
+            initials: getInitials(cleanName || assigneeName),
             color: assignee.color,
           });
         }
@@ -481,23 +511,36 @@ export async function fetchAllProjects(userId?: string): Promise<Project[]> {
         query = query.or(`user_id.eq.${userId},user_id.is.null`);
       }
 
-      const { data, error } = await query;
-      if (!error && data) {
-        const projects: Project[] = data.map((p: any) => ({
-          id: p.id,
-          userId: p.user_id,
-          folderId: p.folder_id,
-          slug: p.slug,
-          title: p.title,
-          subtitle: p.subtitle,
-          clientName: p.client_name,
-          brandName: p.brand_name,
-          accessLevel: p.access_level || 'public_view',
-          isFavorite: p.is_favorite || false,
-          status: p.status || 'active',
-          createdAt: p.created_at,
-          updatedAt: p.updated_at,
-        }));
+      const [projectsRes, usersRes] = await Promise.all([
+        query,
+        supabase.from('users').select('id, name, email'),
+      ]);
+
+      const data = projectsRes.data;
+      const userMap = new Map<string, { name: string; email: string }>();
+      (usersRes.data || []).forEach((u: any) => userMap.set(u.id, { name: u.name, email: u.email }));
+
+      if (!projectsRes.error && data) {
+        const projects: Project[] = data.map((p: any) => {
+          const ownerInfo = p.user_id ? userMap.get(p.user_id) : undefined;
+          return {
+            id: p.id,
+            userId: p.user_id,
+            ownerName: ownerInfo?.name || p.owner_name,
+            ownerEmail: ownerInfo?.email || p.owner_email,
+            folderId: p.folder_id,
+            slug: p.slug,
+            title: p.title,
+            subtitle: p.subtitle,
+            clientName: p.client_name,
+            brandName: p.brand_name,
+            accessLevel: p.access_level || 'public_view',
+            isFavorite: p.is_favorite || false,
+            status: p.status || 'active',
+            createdAt: p.created_at,
+            updatedAt: p.updated_at,
+          };
+        });
         return projects;
       }
     } catch (e) {
@@ -526,6 +569,8 @@ export async function fetchTrashProjects(userId?: string): Promise<Project[]> {
         return data.map((p: any) => ({
           id: p.id,
           userId: p.user_id,
+          ownerName: p.owner_name,
+          ownerEmail: p.owner_email,
           folderId: p.folder_id,
           slug: p.slug,
           title: p.title,
@@ -641,23 +686,37 @@ export async function inviteCollaborator(
   email: string,
   permission: PermissionLevel = 'editor',
   timelineTitle: string = 'Timeline Sprint',
-  slug: string = 'master-schedule'
+  slug: string = 'master-schedule',
+  inviterName?: string
 ): Promise<void> {
   const cleanEmail = email.trim().toLowerCase();
   const cleanName = cleanEmail.split('@')[0];
 
-  if (isSupabaseConfigured && supabase) {
-    try {
-      await supabase.from('collaborators').upsert({
-        id: `col-${Date.now()}`,
-        project_id: projectId,
+  try {
+    await fetch(`/api/timeline/${slug}/collaborators`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         email: cleanEmail,
         name: cleanName,
         permission,
-        created_at: new Date().toISOString(),
-      });
-    } catch (e) {
-      console.warn('Failed to save collaborator in Supabase:', e);
+        inviterName,
+      }),
+    });
+  } catch (_) {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('collaborators').upsert({
+          id: `col-${Date.now()}`,
+          project_id: projectId,
+          email: cleanEmail,
+          name: cleanName,
+          permission,
+          created_at: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.warn('Failed to save collaborator in Supabase:', e);
+      }
     }
   }
 }

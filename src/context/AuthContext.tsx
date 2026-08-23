@@ -88,16 +88,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     restoreSession();
 
     if (isSupabaseConfigured && supabase) {
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
         if (session?.user) {
+          const userName = session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User';
           const u: User = {
             id: session.user.id,
             email: session.user.email || '',
-            name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
+            name: userName,
             avatarUrl: session.user.user_metadata?.avatar_url,
             createdAt: session.user.created_at,
           };
           setCurrentUser(u);
+
+          try {
+            if (supabase) {
+              await supabase.from('users').upsert({
+                id: session.user.id,
+                email: session.user.email || '',
+                name: userName,
+                role: 'editor',
+              });
+            }
+          } catch (_) {}
         }
         setIsLoading(false);
       });
@@ -122,13 +134,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return { success: false, error: error.message };
         }
         if (data.user && data.session) {
+          const userName = data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'User';
           const u: User = {
             id: data.user.id,
             email: data.user.email || '',
-            name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'User',
+            name: userName,
             createdAt: data.user.created_at,
           };
           setCurrentUser(u);
+
+          try {
+            await supabase.from('users').upsert({
+              id: data.user.id,
+              email: data.user.email || email,
+              name: userName,
+              role: 'editor',
+            });
+          } catch (_) {}
+
           return { success: true };
         }
       }
@@ -169,6 +192,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // If Supabase requires email verification, session is null
         if (data.user && !data.session) {
+          try {
+            await supabase.from('users').upsert({
+              id: data.user.id,
+              email: data.user.email || email,
+              name: name || email.split('@')[0],
+              role: 'editor',
+            });
+          } catch (_) {}
+
           return {
             success: false,
             requiresEmailConfirmation: true,
@@ -184,6 +216,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             createdAt: data.user.created_at,
           };
           setCurrentUser(u);
+
+          try {
+            await supabase.from('users').upsert({
+              id: data.user.id,
+              email: data.user.email || email,
+              name: name || email.split('@')[0],
+              role: 'editor',
+            });
+          } catch (_) {}
+
           return { success: true };
         }
       }

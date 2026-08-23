@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { WeeklineDashboard } from '@/components/dashboard/WeeklineDashboard';
-import { defaultTimelineData, createInitialTimeline } from '@/lib/default-data';
+import { defaultTimelineData, createInitialTimeline, getInitials } from '@/lib/default-data';
 import { fetchTimelineData, persistTimelineData } from '@/lib/data-service';
 import { TimelineData } from '@/types/timeline';
 import { useAuth } from '@/context/AuthContext';
@@ -31,7 +31,7 @@ export default function DashboardPage() {
       starter.project.userId = currentUser.id;
       starter.project.ownerName = currentUser.name;
       starter.project.ownerEmail = currentUser.email;
-      const initials = (currentUser.name.trim().slice(0, 2) || 'PL').toUpperCase();
+      const initials = getInitials(currentUser.name);
       starter.assignees = [
         {
           id: currentUser.id,

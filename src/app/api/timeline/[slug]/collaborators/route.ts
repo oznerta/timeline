@@ -50,7 +50,7 @@ export async function POST(
   try {
     const { slug } = await params;
     const body = await request.json();
-    const { email, permission = 'editor', name = '' } = body;
+    const { email, permission = 'editor', name = '', inviterName: passedInviterName } = body;
 
     if (!email || !email.includes('@')) {
       return NextResponse.json({ error: 'Valid email address is required' }, { status: 400 });
@@ -59,16 +59,32 @@ export async function POST(
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = (name || cleanEmail.split('@')[0]).trim();
     let projectTitle = 'Timeline Sprint';
+    let resolvedInviterName = (passedInviterName || '').trim();
 
     if (isSupabaseConfigured && supabase) {
       const { data: project } = await supabase
         .from('projects')
-        .select('id, title')
+        .select('id, title, user_id')
         .eq('slug', slug)
         .single();
 
       if (project) {
         projectTitle = project.title;
+
+        // If inviterName wasn't passed directly, resolve from creator in users table
+        if (!resolvedInviterName && project.user_id) {
+          try {
+            const { data: ownerUser } = await supabase
+              .from('users')
+              .select('name, email')
+              .eq('id', project.user_id)
+              .maybeSingle();
+            if (ownerUser?.name) {
+              resolvedInviterName = ownerUser.name;
+            }
+          } catch (_) {}
+        }
+
         const newCol = {
           id: `col-${Date.now()}`,
           project_id: project.id,
@@ -86,7 +102,7 @@ export async function POST(
 
     await sendCollaboratorInviteEmail({
       to: cleanEmail,
-      inviterName: 'Project Owner',
+      inviterName: resolvedInviterName || 'A team member',
       timelineTitle: projectTitle,
       timelineSlug: slug,
       permission,
