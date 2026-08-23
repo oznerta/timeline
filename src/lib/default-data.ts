@@ -56,15 +56,23 @@ export function getRandomTagColor(): string {
  */
 export function getInitials(name: string): string {
   if (!name || !name.trim()) return 'U';
-  const clean = name.trim().replace(/\(You\)/gi, '').trim();
+  const clean = name.trim()
+    .replace(/\(You\)/gi, '')
+    .replace(/\(Owner\)/gi, '')
+    .replace(/\(Editor\)/gi, '')
+    .replace(/\(Viewer\)/gi, '')
+    .trim();
   const words = clean.split(/\s+/).filter(Boolean);
   if (words.length >= 2) {
     return `${words[0][0]}${words[1][0]}`.toUpperCase();
   }
+  if (words.length === 1 && words[0].length >= 2) {
+    return words[0].slice(0, 2).toUpperCase();
+  }
   if (clean.length >= 2) {
     return clean.slice(0, 2).toUpperCase();
   }
-  return clean.toUpperCase();
+  return clean.toUpperCase() || 'U';
 }
 
 /**

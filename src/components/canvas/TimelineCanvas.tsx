@@ -247,7 +247,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
     task: TaskCard;
   } | null>(null);
 
-  // Effective Assignees = Timeline Owner + Saved Assignees + Invited Collaborators
+  // Effective Assignees = Timeline Owner (with (Owner) indicator) + Saved Assignees + Invited Collaborators
   const effectiveAssignees: Assignee[] = useMemo(() => {
     const list: Assignee[] = [];
     const seenIds = new Set<string>();
@@ -264,15 +264,35 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
     ) || (data.assignees && data.assignees.length > 0 ? data.assignees[0] : null);
 
     const ownerId = data.project.userId || savedOwner?.id || currentUser?.id || 'owner';
-    const rawOwnerName =
+    let rawOwnerName =
       (isCurrentViewerOwner ? currentUser?.name : null) ||
       data.project.ownerName ||
-      (savedOwner && savedOwner.name !== 'Owner' && savedOwner.name !== 'Lead' ? savedOwner.name : null) ||
+      (savedOwner &&
+       savedOwner.name !== 'Owner' &&
+       savedOwner.name !== 'Lead' &&
+       savedOwner.name !== 'Timeline Owner'
+        ? savedOwner.name
+        : null) ||
       currentUser?.name ||
-      'Timeline Owner';
+      'Matt';
 
-    const displayName = isCurrentViewerOwner ? `${currentUser?.name || rawOwnerName} (You)` : rawOwnerName;
-    const initials = getInitials(displayName);
+    // Strip out any redundant role labels before formatting
+    rawOwnerName = rawOwnerName
+      .replace(/\(You\)/gi, '')
+      .replace(/\(Owner\)/gi, '')
+      .replace(/\(Editor\)/gi, '')
+      .replace(/\(Viewer\)/gi, '')
+      .trim();
+
+    if (!rawOwnerName || rawOwnerName.toLowerCase() === 'timeline owner') {
+      rawOwnerName = data.project.ownerName || currentUser?.name || 'Matt';
+    }
+
+    const displayName = isCurrentViewerOwner
+      ? `${rawOwnerName} (You) (Owner)`
+      : `${rawOwnerName} (Owner)`;
+
+    const initials = getInitials(rawOwnerName);
 
     list.push({
       id: ownerId,
@@ -286,17 +306,43 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
 
     // 2. Include any other saved assignees from data.assignees (excluding legacy placeholders)
     (data.assignees || []).forEach((ass) => {
-      const normalizedName = (ass.name || '').trim().toLowerCase();
-      if (normalizedName === 'lead' || normalizedName === 'owner' || ass.id.startsWith('assignee-')) return;
-      if (seenIds.has(ass.id) || seenNames.has(normalizedName)) return;
+      const normalizedName = (ass.name || '')
+        .replace(/\(You\)/gi, '')
+        .replace(/\(Owner\)/gi, '')
+        .replace(/\(Editor\)/gi, '')
+        .replace(/\(Viewer\)/gi, '')
+        .trim();
+
+      if (
+        !normalizedName ||
+        normalizedName.toLowerCase() === 'lead' ||
+        normalizedName.toLowerCase() === 'owner' ||
+        normalizedName.toLowerCase() === 'timeline owner' ||
+        ass.id.startsWith('assignee-') ||
+        ass.id === 'owner' ||
+        ass.id === data.project.userId
+      ) {
+        return;
+      }
+      if (seenIds.has(ass.id) || seenNames.has(normalizedName.toLowerCase())) return;
       seenIds.add(ass.id);
-      seenNames.add(normalizedName);
-      list.push({ ...ass, initials: getInitials(ass.name) });
+      seenNames.add(normalizedName.toLowerCase());
+      list.push({
+        ...ass,
+        name: normalizedName,
+        initials: getInitials(normalizedName),
+      });
     });
 
     // 3. Include Invited Collaborators
     (collaborators || []).forEach((col) => {
-      const colName = col.name || col.email.split('@')[0];
+      const colName = (col.name || col.email.split('@')[0])
+        .replace(/\(You\)/gi, '')
+        .replace(/\(Owner\)/gi, '')
+        .replace(/\(Editor\)/gi, '')
+        .replace(/\(Viewer\)/gi, '')
+        .trim();
+
       if (seenIds.has(col.id) || seenNames.has(colName.toLowerCase())) return;
       seenIds.add(col.id);
       seenNames.add(colName.toLowerCase());
@@ -320,11 +366,15 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
     const map = new Map<string, Assignee>();
     effectiveAssignees.forEach((a) => map.set(a.id, a));
 
-    // Handle project owner alternate ID mapping if needed
-    if (currentUser?.id && data.project.userId && currentUser.id !== data.project.userId) {
-      const ownerAssignee = effectiveAssignees.find((a) => a.id === currentUser.id || a.id === data.project.userId);
-      if (ownerAssignee) {
+    const ownerAssignee = effectiveAssignees[0];
+    if (ownerAssignee) {
+      map.set('owner', ownerAssignee);
+      map.set('assignee-owner', ownerAssignee);
+      map.set('lead', ownerAssignee);
+      if (data.project.userId) {
         map.set(data.project.userId, ownerAssignee);
+      }
+      if (currentUser?.id) {
         map.set(currentUser.id, ownerAssignee);
       }
     }
@@ -1323,7 +1373,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                 title="Collaborators on this timeline"
               >
                 <div className="w-6 h-6 rounded-full bg-[#F59E0B] text-gray-950 font-black text-[9px] flex items-center justify-center border-2 border-white shadow-xs">
-                  {getInitials(currentUser?.name || 'U')}
+                  {getInitials(effectiveAssignees[0]?.name || currentUser?.name || 'Owner')}
                 </div>
                 {collaborators.slice(0, 3).map((col) => (
                   <div

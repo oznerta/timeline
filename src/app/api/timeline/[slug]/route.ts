@@ -32,10 +32,28 @@ export async function GET(
             supabase.from('collaborators').select('*').eq('project_id', projId),
           ]);
 
+        let ownerName = projectData.owner_name;
+        let ownerEmail = projectData.owner_email;
+        if (projectData.user_id) {
+          try {
+            const { data: userData } = await supabase
+              .from('users')
+              .select('name, email')
+              .eq('id', projectData.user_id)
+              .maybeSingle();
+            if (userData) {
+              ownerName = userData.name;
+              ownerEmail = userData.email;
+            }
+          } catch (_) {}
+        }
+
         const accessLevel = projectData.access_level || 'public_view';
         const project = {
           id: projectData.id,
           userId: projectData.user_id,
+          ownerName: ownerName,
+          ownerEmail: ownerEmail,
           folderId: projectData.folder_id,
           slug: projectData.slug,
           title: projectData.title,
@@ -43,6 +61,7 @@ export async function GET(
           clientName: projectData.client_name,
           brandName: projectData.brand_name,
           accessLevel: accessLevel,
+          settings: projectData.settings || {},
           isFavorite: projectData.is_favorite || false,
           status: projectData.status || 'active',
           createdAt: projectData.created_at,

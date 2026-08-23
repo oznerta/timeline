@@ -83,9 +83,27 @@ export async function fetchTimelineData(slug: string = 'master-schedule'): Promi
           }
         }
 
+        let ownerName = projectData.owner_name;
+        let ownerEmail = projectData.owner_email;
+        if (projectData.user_id) {
+          try {
+            const { data: userData } = await supabase
+              .from('users')
+              .select('name, email')
+              .eq('id', projectData.user_id)
+              .maybeSingle();
+            if (userData) {
+              ownerName = userData.name;
+              ownerEmail = userData.email;
+            }
+          } catch (_) {}
+        }
+
         const project: Project = {
           id: projectData.id,
           userId: projectData.user_id,
+          ownerName: ownerName,
+          ownerEmail: ownerEmail,
           folderId: projectData.folder_id,
           slug: projectData.slug,
           title: projectData.title,
