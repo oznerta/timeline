@@ -272,19 +272,38 @@ export async function persistTimelineData(data: TimelineData): Promise<void> {
         });
       }
 
-      // Synchronize Categories
-      for (const category of data.categories) {
+      // Synchronize Categories (delete removed, upsert active)
+      const currentCategoryIds = (data.categories || []).map((c) => c.id);
+      if (currentCategoryIds.length > 0) {
+        await supabase
+          .from('category_tracks')
+          .delete()
+          .eq('project_id', data.project.id)
+          .not('id', 'in', `(${currentCategoryIds.map((id) => `"${id}"`).join(',')})`);
+      } else {
+        await supabase.from('category_tracks').delete().eq('project_id', data.project.id);
+      }
+
+      for (const category of data.categories || []) {
         await supabase.from('category_tracks').upsert({
           id: category.id,
           project_id: data.project.id,
           title: category.title,
-          description: category.description,
+          description: category.description || '',
           order_index: category.orderIndex,
-          updated_at: new Date().toISOString(),
         });
       }
 
-      // Synchronize Assignees
+      // Synchronize Assignees (delete removed, upsert active)
+      const currentAssigneeIds = (data.assignees || []).map((a) => a.id);
+      if (currentAssigneeIds.length > 0) {
+        await supabase
+          .from('assignees')
+          .delete()
+          .eq('project_id', data.project.id)
+          .not('id', 'in', `(${currentAssigneeIds.map((id) => `"${id}"`).join(',')})`);
+      }
+
       if (data.assignees) {
         for (const assignee of data.assignees) {
           const isOwnerAssignee =
@@ -315,7 +334,16 @@ export async function persistTimelineData(data: TimelineData): Promise<void> {
         }
       }
 
-      // Synchronize Tags
+      // Synchronize Tags (delete removed, upsert active)
+      const currentTagIds = (data.tags || []).map((t) => t.id);
+      if (currentTagIds.length > 0) {
+        await supabase
+          .from('tags')
+          .delete()
+          .eq('project_id', data.project.id)
+          .not('id', 'in', `(${currentTagIds.map((id) => `"${id}"`).join(',')})`);
+      }
+
       if (data.tags) {
         for (const tag of data.tags) {
           await supabase.from('tags').upsert({

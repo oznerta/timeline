@@ -144,10 +144,13 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Ensure columns exist if tasks table was created in an older migration
+-- Ensure columns exist if tables were created in an older migration
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS day_span INT NOT NULL DEFAULT 1;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assignee_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deliverable_items JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE category_tracks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE assignees ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE tags ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 -- ==========================================================
 -- INDEXES FOR HIGH-PERFORMANCE QUERYING
