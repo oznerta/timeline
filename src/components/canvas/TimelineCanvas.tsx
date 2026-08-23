@@ -336,23 +336,32 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
 
     // 3. Include Invited Collaborators
     (collaborators || []).forEach((col) => {
-      const colName = (col.name || col.email.split('@')[0])
+      const isThisColCurrent = Boolean(
+        currentUser?.email && col.email && col.email.toLowerCase() === currentUser.email.toLowerCase()
+      );
+
+      // Prioritize: currentUser.name (if this is the logged-in collaborator), col.name, or email prefix
+      const rawColName =
+        (isThisColCurrent ? currentUser?.name : null) ||
+        col.name ||
+        col.email.split('@')[0];
+
+      const cleanColName = rawColName
         .replace(/\(You\)/gi, '')
         .replace(/\(Owner\)/gi, '')
         .replace(/\(Editor\)/gi, '')
         .replace(/\(Viewer\)/gi, '')
         .trim();
 
-      if (seenIds.has(col.id) || seenNames.has(colName.toLowerCase())) return;
+      if (seenIds.has(col.id) || seenNames.has(cleanColName.toLowerCase())) return;
       seenIds.add(col.id);
-      seenNames.add(colName.toLowerCase());
+      seenNames.add(cleanColName.toLowerCase());
 
-      const isThisColCurrent = currentUser?.email && col.email.toLowerCase() === currentUser.email.toLowerCase();
-      const initials = getInitials(colName);
+      const initials = getInitials(cleanColName);
       list.push({
         id: col.id,
         projectId: data.project.id,
-        name: isThisColCurrent ? `${colName} (You)` : colName,
+        name: isThisColCurrent ? `${cleanColName} (You)` : cleanColName,
         initials,
         color: '#2563EB',
       });
@@ -374,12 +383,27 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
       if (data.project.userId) {
         map.set(data.project.userId, ownerAssignee);
       }
-      if (currentUser?.id) {
+      if (currentUser?.id && data.project.userId && currentUser.id === data.project.userId) {
         map.set(currentUser.id, ownerAssignee);
       }
     }
+
+    // Map collaborators by id, email, and user id
+    (collaborators || []).forEach((col) => {
+      const colAssignee = effectiveAssignees.find((a) => a.id === col.id);
+      if (colAssignee) {
+        map.set(col.id, colAssignee);
+        if (col.email) {
+          map.set(col.email.toLowerCase(), colAssignee);
+        }
+        if (currentUser?.email && col.email.toLowerCase() === currentUser.email.toLowerCase() && currentUser.id) {
+          map.set(currentUser.id, colAssignee);
+        }
+      }
+    });
+
     return map;
-  }, [effectiveAssignees, currentUser?.id, data.project.userId]);
+  }, [effectiveAssignees, currentUser, data.project.userId, collaborators]);
 
   const tagMap = useMemo(() => {
     const map = new Map<string, Tag>();

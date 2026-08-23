@@ -110,7 +110,7 @@ export function WeeklineDashboard({
   const loadWorkspaceData = useCallback(async () => {
     try {
       const [projects, fetchedFolders] = await Promise.all([
-        fetchWorkspaceProjects(currentUser?.id),
+        fetchWorkspaceProjects(currentUser?.id, currentUser?.email),
         fetchWorkspaceFolders(currentUser?.id),
       ]);
 
@@ -126,7 +126,7 @@ export function WeeklineDashboard({
     } finally {
       setIsLoadingData(false);
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.email]);
 
   useEffect(() => {
     loadWorkspaceData();

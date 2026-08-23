@@ -157,11 +157,28 @@ export async function fetchTimelineData(slug: string = 'master-schedule'): Promi
           orderIndex: t.order_index,
         }));
 
-        const collaborators: Collaborator[] = (colRes.data || []).map((c: any) => ({
+        const colList = (colRes.data || []);
+        const colEmails = colList.map((c: any) => (c.email || '').toLowerCase()).filter(Boolean);
+        const colUserMap = new Map<string, string>();
+        if (colEmails.length > 0) {
+          try {
+            const { data: uList } = await supabase
+              .from('users')
+              .select('email, name')
+              .in('email', colEmails);
+            (uList || []).forEach((u: any) => {
+              if (u.email && u.name) {
+                colUserMap.set(u.email.toLowerCase(), u.name);
+              }
+            });
+          } catch (_) {}
+        }
+
+        const collaborators: Collaborator[] = colList.map((c: any) => ({
           id: c.id,
           projectId: c.project_id,
           email: c.email,
-          name: c.name || c.email.split('@')[0],
+          name: colUserMap.get((c.email || '').toLowerCase()) || c.name || c.email.split('@')[0],
           permission: c.permission || 'editor',
           invitedAt: c.created_at,
         }));
@@ -526,51 +543,74 @@ export async function deleteWorkspaceFolder(folderId: string): Promise<void> {
   }
 }
 
-export async function fetchAllProjects(userId?: string): Promise<Project[]> {
+export async function fetchAllProjects(userId?: string, userEmail?: string): Promise<Project[]> {
   if (isSupabaseConfigured && supabase) {
     try {
-      let query = supabase
+      let ownedQuery = supabase
         .from('projects')
         .select('*')
         .neq('status', 'trashed')
         .order('updated_at', { ascending: false });
 
       if (userId) {
-        query = query.or(`user_id.eq.${userId},user_id.is.null`);
+        ownedQuery = ownedQuery.or(`user_id.eq.${userId},user_id.is.null`);
       }
 
-      const [projectsRes, usersRes] = await Promise.all([
-        query,
+      const [ownedRes, usersRes, colRes] = await Promise.all([
+        ownedQuery,
         supabase.from('users').select('id, name, email'),
+        userEmail
+          ? supabase.from('collaborators').select('project_id').eq('email', userEmail.toLowerCase())
+          : Promise.resolve({ data: [] }),
       ]);
 
-      const data = projectsRes.data;
       const userMap = new Map<string, { name: string; email: string }>();
       (usersRes.data || []).forEach((u: any) => userMap.set(u.id, { name: u.name, email: u.email }));
 
-      if (!projectsRes.error && data) {
-        const projects: Project[] = data.map((p: any) => {
-          const ownerInfo = p.user_id ? userMap.get(p.user_id) : undefined;
-          return {
-            id: p.id,
-            userId: p.user_id,
-            ownerName: ownerInfo?.name || p.owner_name,
-            ownerEmail: ownerInfo?.email || p.owner_email,
-            folderId: p.folder_id,
-            slug: p.slug,
-            title: p.title,
-            subtitle: p.subtitle,
-            clientName: p.client_name,
-            brandName: p.brand_name,
-            accessLevel: p.access_level || 'public_view',
-            isFavorite: p.is_favorite || false,
-            status: p.status || 'active',
-            createdAt: p.created_at,
-            updatedAt: p.updated_at,
-          };
-        });
-        return projects;
+      const ownedData = ownedRes.data || [];
+      const ownedIds = new Set(ownedData.map((p: any) => p.id));
+
+      const sharedProjectIds = ((colRes as any)?.data || [])
+        .map((c: any) => c.project_id)
+        .filter((id: string) => id && !ownedIds.has(id));
+
+      let sharedData: any[] = [];
+      if (sharedProjectIds.length > 0) {
+        const { data: sharedProjectsRes } = await supabase
+          .from('projects')
+          .select('*')
+          .in('id', sharedProjectIds)
+          .neq('status', 'trashed')
+          .order('updated_at', { ascending: false });
+        sharedData = sharedProjectsRes || [];
       }
+
+      const mapProject = (p: any, isShared: boolean = false): Project => {
+        const ownerInfo = p.user_id ? userMap.get(p.user_id) : undefined;
+        return {
+          id: p.id,
+          userId: p.user_id,
+          ownerName: ownerInfo?.name || p.owner_name,
+          ownerEmail: ownerInfo?.email || p.owner_email,
+          folderId: isShared ? undefined : p.folder_id,
+          slug: p.slug,
+          title: p.title,
+          subtitle: p.subtitle,
+          clientName: p.client_name,
+          brandName: p.brand_name,
+          accessLevel: p.access_level || 'public_view',
+          isFavorite: p.is_favorite || false,
+          isShared: isShared,
+          status: p.status || 'active',
+          createdAt: p.created_at,
+          updatedAt: p.updated_at,
+        };
+      };
+
+      const ownedProjects = ownedData.map((p: any) => mapProject(p, false));
+      const sharedProjects = sharedData.map((p: any) => mapProject(p, true));
+
+      return [...ownedProjects, ...sharedProjects];
     } catch (e) {
       console.warn('Failed to fetch projects from Supabase:', e);
     }

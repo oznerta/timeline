@@ -107,11 +107,28 @@ export async function GET(
           orderIndex: t.order_index,
         }));
 
-        const collaborators = (colRes.data || []).map((c: any) => ({
+        const colList = (colRes.data || []);
+        const colEmails = colList.map((c: any) => (c.email || '').toLowerCase()).filter(Boolean);
+        const colUserMap = new Map<string, string>();
+        if (colEmails.length > 0) {
+          try {
+            const { data: uList } = await supabase
+              .from('users')
+              .select('email, name')
+              .in('email', colEmails);
+            (uList || []).forEach((u: any) => {
+              if (u.email && u.name) {
+                colUserMap.set(u.email.toLowerCase(), u.name);
+              }
+            });
+          } catch (_) {}
+        }
+
+        const collaborators = colList.map((c: any) => ({
           id: c.id,
           projectId: c.project_id,
           email: c.email,
-          name: c.name || c.email.split('@')[0],
+          name: colUserMap.get((c.email || '').toLowerCase()) || c.name || c.email.split('@')[0],
           permission: c.permission || 'editor',
           invitedAt: c.created_at,
         }));
