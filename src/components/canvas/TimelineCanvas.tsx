@@ -61,6 +61,7 @@ import {
   repositionTasksWithMode,
   ReorderMode,
 } from '@/lib/timeline-scheduler';
+import { computeTrackLanes } from '@/lib/lane-layout';
 import { useTimelineHistory } from '@/hooks/useTimelineHistory';
 
 interface TimelineCanvasProps {
@@ -634,35 +635,8 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
         updatedAt: new Date().toISOString(),
       };
 
-      // Check collision on destination track
-      const trackTasks = data.tasks.filter(
-        (t) => t.sprintId === activeSprint.id && t.categoryId === destCategoryId
-      );
-      const collision = checkTaskCollision(
-        displayDays,
-        trackTasks,
-        newTaskId,
-        destDayId,
-        clonedTask.daySpan || 1
-      );
-
-      if (collision.hasCollision) {
-        // Automatically cascade push right to accommodate the new duplicate cleanly
-        const reordered = repositionTasksWithMode(
-          displayDays,
-          [...trackTasks, clonedTask],
-          newTaskId,
-          destDayId,
-          'push_right'
-        );
-        const otherTasks = data.tasks.filter(
-          (t) => !(t.sprintId === activeSprint.id && t.categoryId === destCategoryId)
-        );
-        handlePersistChanges({ ...data, tasks: [...otherTasks, ...reordered] });
-      } else {
-        handlePersistChanges({ ...data, tasks: [...data.tasks, clonedTask] });
-      }
-
+      // Place duplicate directly in the track with multi-lane stacking
+      handlePersistChanges({ ...data, tasks: [...data.tasks, clonedTask] });
       setContextMenuState(null);
     },
     [isReadOnly, displayDays, data, activeSprint.id, handlePersistChanges]
@@ -1925,19 +1899,26 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                 (t) => t.sprintId === activeSprint.id && t.categoryId === cat.id
               );
 
+              // Multi-lane layout computation for stacked cards in a day
+              const { taskLaneMap, maxLanes } = computeTrackLanes(
+                activeSprint.days,
+                displayDays,
+                trackTasks
+              );
+
               return (
                 <div
                   key={cat.id}
-                  className="grid bg-white hover:bg-gray-50/30 transition-colors relative min-h-[135px]"
+                  className="grid bg-white hover:bg-gray-50/30 transition-colors relative"
                   style={{
                     gridTemplateColumns: columnTemplate,
-                    gridTemplateRows: 'auto',
+                    gridTemplateRows: `repeat(${maxLanes}, minmax(135px, auto))`,
                   }}
                 >
                   {/* Left Work Stream Column */}
                   <div
                     className="sticky left-0 z-10 bg-white border-r border-gray-200 p-3.5 flex items-center justify-between group/track shadow-2xs"
-                    style={{ gridColumn: 1, gridRow: 1 }}
+                    style={{ gridColumn: 1, gridRow: `1 / span ${maxLanes}` }}
                   >
                     {isEditing ? (
                       <form onSubmit={handleRenameTrack} className="flex items-center gap-1.5 w-full">
@@ -1998,7 +1979,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                   {/* Day Background Grid Cells */}
                   {displayDays.map((day, dIdx) => {
                     const isDragTarget = dragOverDayId === day.id && dragOverCategoryId === cat.id;
-                    const hasCardStartingHere = trackTasks.some((t) => t.dayId === day.id);
+                    const startingTasksHere = trackTasks.filter((t) => t.dayId === day.id);
 
                     return (
                       <div
@@ -2020,30 +2001,34 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                         }}
                         onDrop={(e) => handleDayDrop(e, cat.id, day.id)}
                         onClick={() => {
-                          if (!isReadOnly && !hasCardStartingHere) {
+                          if (!isReadOnly) {
                             handleOpenNewTaskModal(cat.id, day.id);
                           }
                         }}
-                        className={`p-2 flex flex-col justify-center min-h-[135px] relative group/cell transition-colors ${
+                        className={`p-2 flex flex-col justify-end min-h-[135px] relative group/cell transition-colors ${
                           day.isWeekStart ? 'border-l-2 border-gray-200 bg-gray-50/30' : 'border-l border-gray-200/60'
                         } ${day.isWeekend ? 'bg-amber-50/10' : ''} ${
                           isDragTarget ? 'bg-amber-100/60 ring-2 ring-inset ring-[#F59E0B]' : ''
                         } ${
-                          !isReadOnly && !hasCardStartingHere ? 'cursor-pointer' : ''
+                          !isReadOnly ? 'cursor-pointer' : ''
                         }`}
-                        style={{ gridColumn: dIdx + 2, gridRow: 1, zIndex: 1 }}
+                        style={{ gridColumn: dIdx + 2, gridRow: `1 / span ${maxLanes}`, zIndex: 1 }}
                       >
                         {/* Quick Add Button on Hover */}
-                        {!isReadOnly && !hasCardStartingHere && !isDragTarget && (
+                        {!isReadOnly && !isDragTarget && (
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleOpenNewTaskModal(cat.id, day.id);
                             }}
-                            className="w-full h-[110px] border border-dashed border-gray-200 hover:border-[#F59E0B] rounded-xl text-gray-300 hover:text-[#D97706] flex items-center justify-center transition-all opacity-0 group-hover/cell:opacity-100 cursor-pointer"
+                            title={startingTasksHere.length > 0 ? 'Add another card to this day' : 'Add card'}
+                            className={`w-full py-1.5 border border-dashed border-gray-300 hover:border-[#F59E0B] hover:bg-amber-50/50 rounded-xl text-gray-400 hover:text-[#D97706] flex items-center justify-center gap-1 text-[11px] font-bold transition-all opacity-0 group-hover/cell:opacity-100 cursor-pointer shadow-2xs ${
+                              startingTasksHere.length === 0 ? 'h-[110px]' : 'mt-1'
+                            }`}
                           >
-                            <Plus className="w-4 h-4" />
+                            <Plus className="w-3.5 h-3.5" />
+                            {startingTasksHere.length > 0 && <span>Add card</span>}
                           </button>
                         )}
                       </div>
@@ -2070,6 +2055,8 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                     });
                     const tag = t.tagId ? tagMap.get(t.tagId) : undefined;
                     const cardBg = tag?.color || '#0F172A';
+
+                    const laneIndex = taskLaneMap.get(t.id) ?? 0;
 
                     return (
                       <div
@@ -2120,7 +2107,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                         }`}
                         style={{
                           gridColumn: `${proj.startVisibleIndex + 2} / span ${proj.visibleSpan}`,
-                          gridRow: 1,
+                          gridRow: laneIndex + 1,
                           zIndex: 2,
                         }}
                       >
@@ -3283,6 +3270,23 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
 
             {/* Action Options */}
             <div className="flex flex-col gap-2.5">
+              {/* Stack Option */}
+              <button
+                type="button"
+                onClick={() => handleExecuteReorder('stack')}
+                className="w-full p-3.5 rounded-2xl border-2 border-amber-300 bg-amber-50/70 hover:bg-amber-100 flex items-center justify-between text-left transition-all cursor-pointer group shadow-xs"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-xl bg-[#F59E0B] text-gray-950 flex items-center justify-center font-black text-xs transition-colors shadow-xs">
+                    +
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-gray-900">Stack on this Day (Keep Both)</div>
+                    <div className="text-[11px] text-amber-800 font-medium">Place alongside existing card in a new sub-lane</div>
+                  </div>
+                </div>
+              </button>
+
               <button
                 type="button"
                 onClick={() => handleExecuteReorder('push_right')}
@@ -3380,7 +3384,20 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
                 <Copy className="w-3.5 h-3.5 text-amber-600" />
                 <span>Duplicate Card</span>
               </div>
-              <span className="text-[10px] text-gray-400 font-mono">Alt+Drag</span>
+              <span className="text-[10px] text-gray-400 font-mono">Alt+Drag / Ctrl+D</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const { categoryId, dayId } = contextMenuState.task;
+                setContextMenuState(null);
+                handleOpenNewTaskModal(categoryId, dayId);
+              }}
+              className="flex items-center gap-2 px-2.5 py-2 rounded-xl font-bold text-gray-700 hover:bg-amber-50 hover:text-amber-700 transition-colors cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5 text-amber-600" />
+              <span>Add another card here</span>
             </button>
 
             <button

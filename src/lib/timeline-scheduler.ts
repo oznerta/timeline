@@ -1,6 +1,6 @@
 import { DayInfo, TaskCard } from '@/types/timeline';
 
-export type ReorderMode = 'push_right' | 'push_left' | 'swap';
+export type ReorderMode = 'push_right' | 'push_left' | 'swap' | 'stack';
 
 export interface VisibleProjection {
   isVisible: boolean;
@@ -166,6 +166,10 @@ export function repositionTasksWithMode(
 
   const movingSpan = Math.max(1, movingTask.daySpan || 1);
   const totalDays = days.length;
+
+  if (mode === 'stack') {
+    return trackTasks.map((t) => (t.id === movingTaskId ? { ...t, dayId: targetDayId } : t));
+  }
 
   if (mode === 'swap') {
     const otherTasks = trackTasks.filter((t) => t.id !== movingTaskId);
