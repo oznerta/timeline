@@ -49,7 +49,7 @@ export default function DashboardPage() {
 
   if (isAuthLoading || (!currentUser && isAuthLoading)) {
     return (
-      <div className="h-screen w-full bg-[#F8F9FA] flex flex-col items-center justify-center text-gray-500 text-xs font-bold gap-3 select-none">
+      <div className="h-screen w-full bg-[var(--background)] flex flex-col items-center justify-center text-[var(--foreground-muted)] text-xs font-bold gap-3 select-none">
         <div className="w-8 h-8 rounded-xl bg-[#F59E0B] text-gray-950 font-black flex items-center justify-center text-sm shadow-md animate-pulse">
           W
         </div>

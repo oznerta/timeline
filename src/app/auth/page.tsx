@@ -206,7 +206,7 @@ function AuthForm() {
 
 export default function AuthPage() {
   return (
-    <main className="min-h-screen w-full bg-[#F8F9FA] text-gray-900 font-sans flex flex-col justify-between p-6 sm:p-10 select-none">
+    <main className="min-h-screen w-full bg-[var(--background)] text-gray-900 font-sans flex flex-col justify-between p-6 sm:p-10 select-none">
       {/* Top Brand */}
       <header className="flex items-center justify-between max-w-5xl mx-auto w-full">
         <div className="flex items-center gap-2.5">

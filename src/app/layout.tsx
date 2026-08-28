@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/context/AuthContext';
+import { ThemeProvider } from '@/context/ThemeContext';
 
 export const metadata: Metadata = {
   title: 'Weekline — Sprint Delivery Timeline Workspace',
@@ -13,10 +14,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="h-full antialiased light">
-      <body className="min-h-full flex flex-col bg-[#F8F9FA] text-gray-900">
-        <AuthProvider>{children}</AuthProvider>
+    <html lang="en" className="h-full antialiased">
+      <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--foreground)]">
+        <ThemeProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
 }
+

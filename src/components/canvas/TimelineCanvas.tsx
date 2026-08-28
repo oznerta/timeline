@@ -3,6 +3,8 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
+import { useTheme } from '@/context/ThemeContext';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -19,15 +21,19 @@ import {
   Loader2,
   Lock,
   LogIn,
+  Maximize2,
+  Minimize2,
+  Moon,
   Mouse,
   Plus,
+  Redo2,
   Settings,
   Share2,
   SlidersHorizontal,
+  Sun,
   Tag as TagIcon,
   Trash2,
   Undo2,
-  Redo2,
   User as UserIcon,
   UserPlus,
   Users,
@@ -44,7 +50,6 @@ import {
   TimelineData,
   WeekGroup,
 } from '@/types/timeline';
-import { useAuth } from '@/context/AuthContext';
 import {
   CURATED_TAG_COLORS,
   getRandomTagColor,
@@ -75,6 +80,7 @@ const WORKDAYS_LIST = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
 export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvasProps) {
   const { currentUser } = useAuth();
+  const { theme, resolvedTheme, toggleTheme, density, toggleDensity } = useTheme();
   const [data, setData, historyControls] = useTimelineHistory(
     useMemo(
       () => ({
@@ -1308,7 +1314,7 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
   };
 
   return (
-    <div className="relative h-screen w-full bg-[#F8F9FA] text-gray-900 font-sans antialiased overflow-hidden select-none flex flex-col">
+    <div className="relative h-screen w-full bg-[var(--background)] text-gray-900 font-sans antialiased overflow-hidden select-none flex flex-col">
       {/* TOP BRAND & STUDIO APP BAR */}
       <header className="h-14 bg-white border-b border-gray-200 z-40 px-4 flex items-center justify-between shrink-0 shadow-2xs">
         <div className="flex items-center gap-3">
@@ -1351,8 +1357,38 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
           )}
         </div>
 
-        {/* Collaborators and Share Action */}
-        <div className="flex items-center gap-3">
+        {/* Theme, Density, Collaborators and Share Action */}
+        <div className="flex items-center gap-2">
+          {/* Quick Theme Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title={`Switch to ${resolvedTheme === 'light' ? 'Dark' : 'Light'} Mode`}
+            className="p-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 hover:text-gray-900 transition-colors cursor-pointer"
+          >
+            {resolvedTheme === 'dark' ? (
+              <Sun className="w-4 h-4 text-amber-400" />
+            ) : (
+              <Moon className="w-4 h-4 text-gray-600" />
+            )}
+          </button>
+
+          {/* Quick Density Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleDensity}
+            title={`Switch to ${density === 'default' ? 'Compact' : 'Default'} Density`}
+            className="p-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 hover:text-gray-900 transition-colors cursor-pointer hidden sm:flex"
+          >
+            {density === 'compact' ? (
+              <Minimize2 className="w-4 h-4 text-[#D97706]" />
+            ) : (
+              <Maximize2 className="w-4 h-4 text-gray-600" />
+            )}
+          </button>
+
+          <div className="h-4 w-px bg-gray-200 mx-1" />
+
           {!currentUser ? (
             <button
               type="button"
@@ -1809,9 +1845,9 @@ export function TimelineCanvas({ initialData, onSaveData, slug }: TimelineCanvas
       {/* FULL-WIDTH FULL-HEIGHT TIMELINE WORKSPACE */}
       <div
         ref={gridContainerRef}
-        className="flex-1 w-full overflow-auto relative bg-[#F8F9FA]"
+        className="flex-1 w-full overflow-auto relative bg-[var(--background)]"
       >
-        <div className="w-max min-w-full pb-16">
+        <div className="w-max min-w-full min-h-full pb-16 bg-[var(--background)]">
           {/* STICKY HEADER: CYCLES & DAYS ROW */}
           <div className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-2xs">
             {/* Week Groups (Cycles) Row */}

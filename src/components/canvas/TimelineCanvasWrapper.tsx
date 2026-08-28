@@ -43,7 +43,7 @@ export function TimelineCanvasWrapper({ slug }: { slug: string }) {
 
   if (loading || isAuthLoading) {
     return (
-      <div className="h-screen w-full bg-[#F8F9FA] flex flex-col items-center justify-center text-gray-500 text-xs font-bold gap-3 select-none">
+      <div className="h-screen w-full bg-[var(--background)] flex flex-col items-center justify-center text-gray-500 text-xs font-bold gap-3 select-none">
         <div className="w-8 h-8 rounded-xl bg-[#F59E0B] text-gray-950 font-black flex items-center justify-center text-sm shadow-md animate-pulse">
           W
         </div>
@@ -55,7 +55,7 @@ export function TimelineCanvasWrapper({ slug }: { slug: string }) {
   // Not Found Screen
   if (notFound) {
     return (
-      <div className="min-h-screen w-full bg-[#F8F9FA] flex flex-col items-center justify-center p-6 select-none">
+      <div className="min-h-screen w-full bg-[var(--background)] flex flex-col items-center justify-center p-6 select-none">
         <div className="bg-white border border-gray-200 rounded-3xl p-8 max-w-md w-full shadow-xl flex flex-col items-center text-center gap-5">
           <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 text-[#D97706] font-black text-lg flex items-center justify-center shadow-xs">
             404
@@ -110,7 +110,7 @@ export function TimelineCanvasWrapper({ slug }: { slug: string }) {
   if (restrictedError?.isRestricted || !hasAccess) {
     const title = data?.project?.title || restrictedError?.projectTitle || slug;
     return (
-      <div className="min-h-screen w-full bg-[#F8F9FA] flex flex-col items-center justify-center p-6 select-none">
+      <div className="min-h-screen w-full bg-[var(--background)] flex flex-col items-center justify-center p-6 select-none">
         <div className="bg-white border border-gray-200 rounded-3xl p-8 max-w-md w-full shadow-xl flex flex-col items-center text-center gap-5">
           <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 text-[#D97706] flex items-center justify-center shadow-xs">
             <Lock className="w-6 h-6" />

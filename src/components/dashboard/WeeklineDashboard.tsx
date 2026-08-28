@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { useTheme } from '@/context/ThemeContext';
 import {
   Calendar,
   Check,
@@ -21,11 +22,16 @@ import {
   LayoutDashboard,
   List,
   LogOut,
+  Maximize2,
+  Minimize2,
+  Monitor,
+  Moon,
   MoreVertical,
   Plus,
   RotateCcw,
   Search,
   Share2,
+  Sun,
   Trash2,
   User,
   Users,
@@ -61,6 +67,7 @@ export function WeeklineDashboard({
 }: WeeklineDashboardProps) {
   const router = useRouter();
   const { currentUser, signOut } = useAuth();
+  const { theme, resolvedTheme, setTheme, density, toggleDensity } = useTheme();
 
   const [projectsList, setProjectsList] = useState<Project[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -352,7 +359,7 @@ export function WeeklineDashboard({
   const userInitial = getInitials(currentUser?.name || 'User');
 
   return (
-    <div className="flex h-screen w-full bg-[#F8F9FA] text-gray-900 font-sans antialiased overflow-hidden select-none">
+    <div className="flex h-screen w-full bg-[var(--background)] text-gray-900 font-sans antialiased overflow-hidden select-none">
       {/* LEFT SIDEBAR */}
       <aside className="w-72 min-w-[280px] bg-white border-r border-gray-200 flex flex-col justify-between shrink-0 select-none shadow-2xs">
         <div className="flex flex-col p-4 overflow-y-auto flex-1 gap-4">
@@ -669,6 +676,73 @@ export function WeeklineDashboard({
           </div>
         </div>
 
+        {/* Theme & Preference Controls */}
+        <div className="px-3 py-2.5 border-t border-gray-200 bg-gray-50/30 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Theme</span>
+            <div className="flex items-center p-0.5 bg-gray-200/60 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setTheme('light')}
+                title="Light Mode"
+                className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                  theme === 'light'
+                    ? 'bg-white text-[#D97706] shadow-xs font-black'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                <Sun className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTheme('dark')}
+                title="Dark Mode"
+                className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                  theme === 'dark'
+                    ? 'bg-white text-amber-400 shadow-xs font-black'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                <Moon className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTheme('system')}
+                title="Follow System Theme"
+                className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                  theme === 'system'
+                    ? 'bg-white text-[#D97706] shadow-xs font-black'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                <Monitor className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Density</span>
+            <button
+              type="button"
+              onClick={toggleDensity}
+              title={`Switch to ${density === 'default' ? 'Compact' : 'Default'} Density`}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-[11px] transition-colors cursor-pointer"
+            >
+              {density === 'compact' ? (
+                <>
+                  <Minimize2 className="w-3 h-3 text-[#D97706]" />
+                  <span>Compact</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-3 h-3 text-gray-500" />
+                  <span>Default</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
         {/* User Profile Card with Sign Out */}
         <div className="p-3 border-t border-gray-200 bg-gray-50/50">
           <div className="flex items-center justify-between p-2 rounded-2xl bg-white border border-gray-200/80 shadow-2xs">
@@ -699,7 +773,7 @@ export function WeeklineDashboard({
       </aside>
 
       {/* MAIN CONTENT AREA */}
-      <main className="flex-1 flex flex-col overflow-hidden bg-[#F8F9FA]">
+      <main className="flex-1 flex flex-col overflow-hidden bg-[var(--background)]">
         {/* Top Header Bar */}
         <header className="min-h-16 py-3 border-b border-gray-200 bg-white px-6 md:px-8 flex flex-wrap items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
